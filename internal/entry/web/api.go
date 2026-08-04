@@ -3,9 +3,11 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
@@ -584,25 +586,81 @@ func toSimPayload(ev sim.Event) simEventPayload {
 	return p
 }
 
+// saveUploadedImport 保存上传的导入源文件到书目录 web-imports/，返回路径。
+// 文件名仅取 Base 并防覆盖（同名加时间戳前缀）。
+func saveUploadedImport(book *Book, f multipart.File, header *multipart.FileHeader) (string, error) {
+	name := filepath.Base(header.Filename)
+	if name == "." || name == ".." || name == "" {
+		return "", errors.New("无效的文件名")
+	}
+	dir := filepath.Join(book.host.Dir(), "web-imports")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	dst := filepath.Join(dir, name)
+	if _, err := os.Stat(dst); err == nil {
+		dst = filepath.Join(dir, fmt.Sprintf("%d-%s", time.Now().UnixNano(), name))
+	}
+	out, err := os.Create(dst)
+	if err != nil {
+		return "", err
+	}
+	defer out.Close()
+	if _, err := io.Copy(out, f); err != nil {
+		os.Remove(dst)
+		return "", err
+	}
+	return dst, nil
+}
+
 // handleImport 启动语义导入（事件经 SSE 的 import 类型推送）。
+// 支持两种请求体：JSON（source_path 直接指定路径）与 multipart/form-data（文件上传）。
 func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 	book, ok := s.bookFor(w, r)
 	if !ok {
 		return
 	}
-	var req importRequest
-	if err := decodeBody(w, r, &req); err != nil {
-		return
+	var (
+		req        importRequest
+		sourcePath string
+	)
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+		// 文件上传模式：点击/拖拽上传的源文件 + 表单字段。
+		r.Body = http.MaxBytesReader(w, r.Body, 64<<20)
+		if err := r.ParseMultipartForm(8 << 20); err != nil {
+			writeErr(w, http.StatusBadRequest, "上传表单解析失败: %v", err)
+			return
+		}
+		req.SourcePath = r.FormValue("source_path")
+		req.Story = r.FormValue("story")
+		req.Guidance = r.FormValue("guidance")
+		req.AutoConfirm = r.FormValue("auto_confirm") == "1" || r.FormValue("auto_confirm") == "true"
+		req.Continue = r.FormValue("continue") == "1" || r.FormValue("continue") == "true"
+		if f, header, err := r.FormFile("file"); err == nil {
+			src, err := saveUploadedImport(book, f, header)
+			if err != nil {
+				writeErr(w, http.StatusBadRequest, "保存上传文件失败: %v", err)
+				return
+			}
+			sourcePath = src
+		}
+	} else {
+		if err := decodeBody(w, r, &req); err != nil {
+			return
+		}
 	}
 	if req.Story != "" && req.Story != "open" && req.Story != "closed" {
 		writeErr(w, http.StatusBadRequest, "story 必须是 open 或 closed")
 		return
 	}
-	// 导入源路径约束：必须是书架目录或工作目录内的文件（防越权读取任意路径）。
-	sourcePath, err := s.validateImportSource(req.SourcePath)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, "%v", err)
-		return
+	if sourcePath == "" {
+		// 未上传文件：路径必须位于书架目录或工作目录内（防越权读取任意路径）。
+		var err error
+		sourcePath, err = s.validateImportSource(req.SourcePath)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "%v", err)
+			return
+		}
 	}
 	opts := imp.Options{
 		SourcePath:      sourcePath,

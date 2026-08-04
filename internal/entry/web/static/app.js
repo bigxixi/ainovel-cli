@@ -9,10 +9,10 @@
 // ================= API 客户端 =================
 
 async function api(path, opts = {}) {
-  const res = await fetch(path, {
-    headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
-    ...opts,
-  });
+  // FormData（文件上传）不手动设 Content-Type：浏览器自动带 multipart boundary。
+  const headers = { ...(opts.headers || {}) };
+  if (!(opts.body instanceof FormData)) headers['Content-Type'] = 'application/json';
+  const res = await fetch(path, { headers, ...opts });
   if (res.status === 401) {
     // 未登录/会话过期：切回登录视图（除登录相关端点外）。
     if (!path.includes('/login') && !path.includes('/auth-status') && !path.includes('/setup-auth')) {
@@ -1157,7 +1157,31 @@ function onAux(kind, payload) {
 
 function openImportModal() {
   const id = state.currentBookId;
-  const sourceInput = el('input', { type: 'text', placeholder: '外部小说文件路径（留空 = 恢复未完成导入）' });
+  // 文件上传区（点击选择 / 拖拽）。
+  const fileInput = el('input', { type: 'file', class: 'hidden' });
+  let pickedFile = null;
+  const dropZone = el('div', { class: 'drop-zone', text: '＋ 点击选择文件，或将小说文件拖拽到此处' });
+  const setFile = (f) => {
+    pickedFile = f;
+    dropZone.textContent = f ? '📄 ' + f.name + '（点击可重新选择）' : '＋ 点击选择文件，或将小说文件拖拽到此处';
+    dropZone.classList.toggle('has-file', !!f);
+  };
+  dropZone.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => setFile(fileInput.files[0] || null));
+  ['dragover', 'dragenter'].forEach((ev) => dropZone.addEventListener(ev, (e) => {
+    e.preventDefault();
+    dropZone.classList.add('dragging');
+  }));
+  ['dragleave', 'drop'].forEach((ev) => dropZone.addEventListener(ev, (e) => {
+    e.preventDefault();
+    dropZone.classList.remove('dragging');
+  }));
+  dropZone.addEventListener('drop', (e) => {
+    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) setFile(f);
+  });
+
+  const sourceInput = el('input', { type: 'text', placeholder: '或直接输入服务器上的文件路径（留空恢复未完成导入）' });
   const yesBox = el('label', { style: 'flex-direction:row;align-items:center;gap:6px' },
     el('input', { type: 'checkbox' }), ' 自动接受切分（--yes）');
   const storySel = el('select', {},
@@ -1176,7 +1200,9 @@ function openImportModal() {
   const modal = openModal({
     title: '外部小说导入',
     body: el('div', { class: 'setup-wrap', style: 'margin:0;padding:0' },
-      el('label', { text: '源文件路径' }, sourceInput),
+      fileInput,
+      dropZone,
+      el('label', { text: '服务器文件路径（与上传二选一）' }, sourceInput),
       yesBox, storySel, contBox,
       el('label', { text: '切分指导' }, guideInput),
       logBox
@@ -1206,13 +1232,23 @@ function openImportModal() {
   startBtn.addEventListener('click', async () => {
     startBtn.disabled = true;
     try {
-      await postJSON(`/api/books/${id}/import`, {
-        source_path: sourceInput.value.trim(),
-        auto_confirm: yesBox.querySelector('input').checked,
-        story: storySel.value,
-        continue: contBox.querySelector('input').checked,
-        guidance: guideInput.value.trim(),
-      });
+      if (pickedFile) {
+        const fd = new FormData();
+        fd.append('file', pickedFile);
+        fd.append('story', storySel.value);
+        fd.append('guidance', guideInput.value.trim());
+        fd.append('auto_confirm', yesBox.querySelector('input').checked ? '1' : '0');
+        fd.append('continue', contBox.querySelector('input').checked ? '1' : '0');
+        await api(`/api/books/${id}/import`, { method: 'POST', body: fd });
+      } else {
+        await postJSON(`/api/books/${id}/import`, {
+          source_path: sourceInput.value.trim(),
+          auto_confirm: yesBox.querySelector('input').checked,
+          story: storySel.value,
+          continue: contBox.querySelector('input').checked,
+          guidance: guideInput.value.trim(),
+        });
+      }
       log('导入已启动…', 'muted');
     } catch (e) {
       toast(e.message, 'error');
