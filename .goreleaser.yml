@@ -71,6 +71,4 @@ changelog:
       - "^style:"
 
 release:
-  github:
-    owner: voocel
-    name: ainovel-cli
+  # 仓库自动从 git remote 推断（fork 发布时无需改配置）
