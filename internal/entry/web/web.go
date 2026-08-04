@@ -6,9 +6,11 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -20,7 +22,9 @@ import (
 // Options 是 `web` 子命令的启动选项。
 type Options struct {
 	Port     string
+	Host     string // 监听地址（默认 127.0.0.1；远程部署显式放开 0.0.0.0 并配 TLS/反代）
 	BooksDir string
+	DataDir  string // Web 数据目录（users.json 等）
 	Build    buildversion.Info
 }
 
@@ -61,9 +65,15 @@ func Command(argv []string, build buildversion.Info) error {
 	}
 	defer bm.Close()
 
-	server := NewServer(bm)
+	// 单用户鉴权（密码哈希 + session）。
+	auth, err := NewAuth(opts.DataDir)
+	if err != nil {
+		return err
+	}
+
+	server := NewServer(bm, auth)
 	srv := &http.Server{
-		Addr:              ":" + opts.Port,
+		Addr:              net.JoinHostPort(opts.Host, opts.Port),
 		Handler:           server.Handler(),
 		ReadHeaderTimeout: 30 * time.Second,
 	}
@@ -73,7 +83,9 @@ func Command(argv []string, build buildversion.Info) error {
 		slog.Info("ainovel WebUI 已启动",
 			"addr", srv.Addr,
 			"books_dir", opts.BooksDir,
+			"data_dir", opts.DataDir,
 			"setup_needed", bootstrap.NeedsSetup(),
+			"auth_configured", auth.Configured(),
 			"version", build.Version,
 			"commit", build.Commit,
 		)
@@ -109,13 +121,21 @@ func Command(argv []string, build buildversion.Info) error {
 
 // parseOptions 解析 web 子命令参数，支持环境变量兜底。
 func parseOptions(argv []string) (Options, error) {
+	defaultDataDir := filepath.Join(bootstrap.DefaultConfigDir(), "web")
+	if defaultDataDir == filepath.Join("", "web") {
+		defaultDataDir = "./web-data"
+	}
 	opts := Options{
 		Port:     envOr("AINOVEL_WEB_PORT", DefaultPort),
+		Host:     envOr("AINOVEL_WEB_HOST", "127.0.0.1"),
 		BooksDir: envOr("AINOVEL_BOOKS_DIR", "books"),
+		DataDir:  envOr("AINOVEL_WEB_DATA_DIR", defaultDataDir),
 	}
 	fs := flag.NewFlagSet("web", flag.ContinueOnError)
 	fs.StringVar(&opts.Port, "port", opts.Port, "WebUI 监听端口（默认 5269，可用环境变量 AINOVEL_WEB_PORT）")
+	fs.StringVar(&opts.Host, "host", opts.Host, "监听地址（默认 127.0.0.1，可用环境变量 AINOVEL_WEB_HOST）")
 	fs.StringVar(&opts.BooksDir, "books-dir", opts.BooksDir, "书架根目录，每本书一个子目录（默认 ./books，可用环境变量 AINOVEL_BOOKS_DIR）")
+	fs.StringVar(&opts.DataDir, "data-dir", opts.DataDir, "Web 数据目录（users.json 等，默认 ~/.ainovel/web，可用环境变量 AINOVEL_WEB_DATA_DIR）")
 	if err := fs.Parse(argv); err != nil {
 		return Options{}, err
 	}

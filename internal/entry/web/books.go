@@ -16,6 +16,7 @@ import (
 
 	"github.com/voocel/ainovel-cli/assets"
 	"github.com/voocel/ainovel-cli/internal/bootstrap"
+	"github.com/voocel/ainovel-cli/internal/domain"
 	"github.com/voocel/ainovel-cli/internal/entry/startup"
 	"github.com/voocel/ainovel-cli/internal/host"
 	"github.com/voocel/ainovel-cli/internal/logger"
@@ -23,6 +24,9 @@ import (
 
 // booksFileName 是书架清单文件名（位于书架根目录）。
 const booksFileName = "books.json"
+
+// maxBooks 是书架可同时存在的书籍上限（防磁盘/条目无限增长）。
+const maxBooks = 64
 
 // BookMeta 是 books.json 中持久化的书清单条目。
 type BookMeta struct {
@@ -39,7 +43,7 @@ type Book struct {
 	hub        *StreamHub
 	logCleanup func() // 书日志文件关闭函数（Close 时调用）
 
-	cancelMu sync.Mutex
+	cancelMu  sync.Mutex
 	auxCancel context.CancelFunc // 当前附加操作（导入/仿写/共创）的取消函数（可空）
 }
 
@@ -95,6 +99,11 @@ func NewBookManager(cfgLoader func() (bootstrap.Config, error), booksDir string)
 // BooksDir 返回书架根目录。
 func (bm *BookManager) BooksDir() string { return bm.booksDir }
 
+// LoadConfig 返回当前有效配置（供全局 profile 配置读写使用）。
+func (bm *BookManager) LoadConfig() (bootstrap.Config, error) {
+	return bm.cfgLoader()
+}
+
 // CreateRequest 是新建书的请求（快速模式）。
 type CreateRequest struct {
 	Title  string
@@ -139,6 +148,122 @@ func (bm *BookManager) CreateEmpty(title string) (*Book, error) {
 	return bm.createSessionLocked(title)
 }
 
+// CreateAsync 创建一本快速模式的书并异步启动引擎（不阻塞 HTTP 请求）。
+// 启动裁定进度经该书 hub 广播（DECISION/TOOL 事件），失败以 ERROR 事件回显并回滚。
+func (bm *BookManager) CreateAsync(req CreateRequest) (*Book, error) {
+	plan, err := startup.PrepareQuick(startup.Request{
+		Mode:        startup.ModeQuick,
+		UserPrompt:  req.Prompt,
+		Interactive: true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("创作需求无效: %w", err)
+	}
+	book, err := bm.CreateEmpty(req.Title)
+	if err != nil {
+		return nil, err
+	}
+	go func() {
+		if err := book.host.PrepareUserRules(plan.RawPrompt); err != nil {
+			book.hub.Publish(hubMessage{kind: "event", event: host.Event{
+				Time: time.Now(), Category: "ERROR", Level: "error",
+				Summary: "启动失败（准备用户规则）: " + err.Error(),
+			}})
+			bm.removeBook(book)
+			return
+		}
+		if err := book.host.StartPrepared(plan.RawPrompt); err != nil {
+			book.hub.Publish(hubMessage{kind: "event", event: host.Event{
+				Time: time.Now(), Category: "ERROR", Level: "error",
+				Summary: "启动裁定失败: " + err.Error(),
+			}})
+			bm.removeBook(book)
+			return
+		}
+	}()
+	return book, nil
+}
+
+// Remove 从书架移除一本书。
+// keepCompleted=true 时，若书已完结则仅从清单移除（保留目录与小说文件），
+// 否则连同目录一并删除。已完结判定用 Snapshot().Phase。
+func (bm *BookManager) Remove(id string, keepCompleted bool) error {
+	bm.mu.Lock()
+	meta, err := bm.findMetaLocked(id)
+	if err != nil {
+		bm.mu.Unlock()
+		return err
+	}
+	if meta == nil {
+		bm.mu.Unlock()
+		return fmt.Errorf("书架中不存在书 %q", id)
+	}
+	// 防御：目录名必须是单段相对路径（与 Get 一致），拒绝路径穿越。
+	if meta.Dir == "" || filepath.Base(meta.Dir) != meta.Dir {
+		bm.mu.Unlock()
+		return fmt.Errorf("非法书目录名 %q", meta.Dir)
+	}
+	b := bm.books[id]
+	if b != nil {
+		delete(bm.books, id)
+	}
+	bm.mu.Unlock()
+
+	// 判断是否已完结（keepCompleted 时才需要）。
+	completed := false
+	if keepCompleted && b != nil && b.host != nil {
+		completed = domain.Phase(b.host.Snapshot().Phase) == domain.PhaseComplete
+	} else if keepCompleted && b == nil {
+		if b2, err := bm.Get(id); err == nil {
+			completed = domain.Phase(b2.host.Snapshot().Phase) == domain.PhaseComplete
+			// 临时打开的会话必须关闭，否则 flock 目录锁泄漏。
+			b2.hub.Close()
+			b2.host.Close()
+			if b2.logCleanup != nil {
+				b2.logCleanup()
+			}
+			bm.mu.Lock()
+			delete(bm.books, id)
+			bm.mu.Unlock()
+		}
+	}
+
+	// 关闭会话（若打开）。
+	if b != nil {
+		b.hub.Close()
+		b.host.Close()
+		if b.logCleanup != nil {
+			b.logCleanup()
+		}
+	}
+
+	// 从清单移除。
+	bm.mu.Lock()
+	if metas, err := bm.loadBooks(); err == nil {
+		filtered := metas[:0]
+		for _, m := range metas {
+			if m.ID != id {
+				filtered = append(filtered, m)
+			}
+		}
+		if len(filtered) != len(metas) {
+			if err := bm.saveBooks(filtered); err != nil {
+				bm.mu.Unlock()
+				return fmt.Errorf("更新书架清单: %w", err)
+			}
+		}
+	}
+	bm.mu.Unlock()
+
+	// 删除目录（保留完结书时不删）。
+	if !(keepCompleted && completed) {
+		if err := os.RemoveAll(filepath.Join(bm.booksDir, meta.Dir)); err != nil {
+			return fmt.Errorf("删除书目录: %w", err)
+		}
+	}
+	return nil
+}
+
 // StartWithPrompt 用给定 prompt 启动一本书的引擎（冷启动共创的 Apply 路径）。
 func (bm *BookManager) StartWithPrompt(book *Book, prompt string) error {
 	prompt = strings.TrimSpace(prompt)
@@ -159,6 +284,9 @@ func (bm *BookManager) StartWithPrompt(book *Book, prompt string) error {
 func (bm *BookManager) createSessionLocked(title string) (*Book, error) {
 	if bm.closed {
 		return nil, errors.New("book manager 已关闭")
+	}
+	if len(bm.books) >= maxBooks {
+		return nil, fmt.Errorf("书架书籍数量已达上限（%d 本），请先删除部分书籍", maxBooks)
 	}
 	cfg, err := bm.cfgLoader()
 	if err != nil {

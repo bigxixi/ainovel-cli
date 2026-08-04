@@ -26,10 +26,11 @@ import (
 
 // registerBookRoutes 注册书籍与会话相关路由（书架清单、新建、快照、SSE 事件流）。
 func (s *Server) registerBookRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/books", s.handleListBooks)
-	mux.HandleFunc("POST /api/books", s.handleCreateBook)
-	mux.HandleFunc("GET /api/books/{id}", s.handleGetBook)
-	mux.HandleFunc("GET /api/books/{id}/stream", s.handleBookStream)
+	mux.HandleFunc("GET /api/books", s.guard(s.handleListBooks))
+	mux.HandleFunc("POST /api/books", s.guard(s.handleCreateBook))
+	mux.HandleFunc("GET /api/books/{id}", s.guard(s.handleGetBook))
+	mux.HandleFunc("GET /api/books/{id}/stream", s.guard(s.handleBookStream))
+	mux.HandleFunc("DELETE /api/books/{id}", s.guard(s.handleDeleteBook))
 }
 
 // handleListBooks 返回书架清单（含会话是否已打开）。
@@ -59,7 +60,8 @@ type createBookRequest struct {
 	Prompt string `json:"prompt"`
 }
 
-// handleCreateBook 新建书：quick 模式同步启动引擎；cocreate 模式仅建会话等待共创。
+// handleCreateBook 新建书：quick 模式立即返回（引擎异步启动，进度经 SSE 推送）；
+// cocreate 模式仅建会话等待共创。
 func (s *Server) handleCreateBook(w http.ResponseWriter, r *http.Request) {
 	var req createBookRequest
 	if err := decodeBody(w, r, &req); err != nil {
@@ -71,7 +73,7 @@ func (s *Server) handleCreateBook(w http.ResponseWriter, r *http.Request) {
 	)
 	switch req.Mode {
 	case "", "quick":
-		book, err = s.books.Create(CreateRequest{Title: req.Title, Prompt: req.Prompt})
+		book, err = s.books.CreateAsync(CreateRequest{Title: req.Title, Prompt: req.Prompt})
 	case "cocreate":
 		book, err = s.books.CreateEmpty(req.Title)
 	default:
@@ -82,7 +84,18 @@ func (s *Server) handleCreateBook(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "%v", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"book": book.Meta})
+	writeJSON(w, http.StatusAccepted, map[string]any{"book": book.Meta, "starting": true})
+}
+
+// handleDeleteBook 删除一本书；?keep_completed=1 时若书已完结则仅从书架移除（保留目录）。
+func (s *Server) handleDeleteBook(w http.ResponseWriter, r *http.Request) {
+	keep := r.URL.Query().Get("keep_completed")
+	keepCompleted := keep == "1" || keep == "true"
+	if err := s.books.Remove(r.PathValue("id"), keepCompleted); err != nil {
+		writeErr(w, http.StatusNotFound, "%v", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "kept": keepCompleted})
 }
 
 // handleGetBook 返回书的 UISnapshot 全量状态。
@@ -225,16 +238,16 @@ func writeSSE(w io.Writer, m hubMessage) error {
 
 // registerControlRoutes 注册运行控制路由（继续/干预/暂停/推进/重开/恢复）。
 func (s *Server) registerControlRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/books/{id}/continue", s.handleContinue)
-	mux.HandleFunc("POST /api/books/{id}/steer", s.handleSteer)
-	mux.HandleFunc("POST /api/books/{id}/abort", s.handleAbort)
-	mux.HandleFunc("POST /api/books/{id}/resume", s.handleResume)
-	mux.HandleFunc("POST /api/books/{id}/advance", s.handleAdvance)
-	mux.HandleFunc("POST /api/books/{id}/advance-mode", s.handleAdvanceMode)
-	mux.HandleFunc("POST /api/books/{id}/reopen", s.handleReopen)
-	mux.HandleFunc("POST /api/books/{id}/cocreate", s.handleCoCreate)
-	mux.HandleFunc("POST /api/books/{id}/cocreate/apply", s.handleCoCreateApply)
-	mux.HandleFunc("POST /api/books/{id}/cocreate/cancel", s.handleCoCreateCancel)
+	mux.HandleFunc("POST /api/books/{id}/continue", s.guard(s.handleContinue))
+	mux.HandleFunc("POST /api/books/{id}/steer", s.guard(s.handleSteer))
+	mux.HandleFunc("POST /api/books/{id}/abort", s.guard(s.handleAbort))
+	mux.HandleFunc("POST /api/books/{id}/resume", s.guard(s.handleResume))
+	mux.HandleFunc("POST /api/books/{id}/advance", s.guard(s.handleAdvance))
+	mux.HandleFunc("POST /api/books/{id}/advance-mode", s.guard(s.handleAdvanceMode))
+	mux.HandleFunc("POST /api/books/{id}/reopen", s.guard(s.handleReopen))
+	mux.HandleFunc("POST /api/books/{id}/cocreate", s.guard(s.handleCoCreate))
+	mux.HandleFunc("POST /api/books/{id}/cocreate/apply", s.guard(s.handleCoCreateApply))
+	mux.HandleFunc("POST /api/books/{id}/cocreate/cancel", s.guard(s.handleCoCreateCancel))
 }
 
 // textRequest 是携带一段文本的请求体。
@@ -490,13 +503,13 @@ func decodeBody(w http.ResponseWriter, r *http.Request, dst any) error {
 
 // registerImportExportRoutes 注册导入/仿写/导出路由。
 func (s *Server) registerImportExportRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/books/{id}/import", s.handleImport)
-	mux.HandleFunc("POST /api/books/{id}/import/confirm", s.handleImportConfirm)
-	mux.HandleFunc("POST /api/books/{id}/import/cancel", s.handleImportCancel)
-	mux.HandleFunc("POST /api/books/{id}/simulate", s.handleSimulate)
-	mux.HandleFunc("POST /api/books/{id}/importsim", s.handleImportSimulation)
-	mux.HandleFunc("POST /api/books/{id}/export", s.handleExport)
-	mux.HandleFunc("GET /api/books/{id}/export-file", s.handleExportFile)
+	mux.HandleFunc("POST /api/books/{id}/import", s.guard(s.handleImport))
+	mux.HandleFunc("POST /api/books/{id}/import/confirm", s.guard(s.handleImportConfirm))
+	mux.HandleFunc("POST /api/books/{id}/import/cancel", s.guard(s.handleImportCancel))
+	mux.HandleFunc("POST /api/books/{id}/simulate", s.guard(s.handleSimulate))
+	mux.HandleFunc("POST /api/books/{id}/importsim", s.guard(s.handleImportSimulation))
+	mux.HandleFunc("POST /api/books/{id}/export", s.guard(s.handleExport))
+	mux.HandleFunc("GET /api/books/{id}/export-file", s.guard(s.handleExportFile))
 }
 
 // importRequest 是语义导入请求体。source_path 为空表示恢复未完成导入。
@@ -800,13 +813,13 @@ func (s *Server) handleExportFile(w http.ResponseWriter, r *http.Request) {
 
 // registerConfigRoutes 注册模型/配置/诊断路由。
 func (s *Server) registerConfigRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/books/{id}/models", s.handleGetModels)
-	mux.HandleFunc("POST /api/books/{id}/switch-model", s.handleSwitchModel)
-	mux.HandleFunc("POST /api/books/{id}/set-thinking", s.handleSetThinking)
-	mux.HandleFunc("GET /api/books/{id}/config", s.handleGetConfig)
-	mux.HandleFunc("POST /api/books/{id}/config", s.handleSaveConfig)
-	mux.HandleFunc("POST /api/books/{id}/config/test", s.handleTestConfig)
-	mux.HandleFunc("POST /api/books/{id}/diag", s.handleDiag)
+	mux.HandleFunc("GET /api/books/{id}/models", s.guard(s.handleGetModels))
+	mux.HandleFunc("POST /api/books/{id}/switch-model", s.guard(s.handleSwitchModel))
+	mux.HandleFunc("POST /api/books/{id}/set-thinking", s.guard(s.handleSetThinking))
+	mux.HandleFunc("GET /api/books/{id}/config", s.guard(s.handleGetConfig))
+	mux.HandleFunc("POST /api/books/{id}/config", s.guard(s.handleSaveConfig))
+	mux.HandleFunc("POST /api/books/{id}/config/test", s.guard(s.handleTestConfig))
+	mux.HandleFunc("POST /api/books/{id}/diag", s.guard(s.handleDiag))
 }
 
 // modelRoles 是可供切换模型的角色（空串 = 默认角色）。
@@ -840,9 +853,9 @@ func (s *Server) handleGetModels(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"providers":      providers,
-		"models":         models,
-		"current":        current,
+		"providers":       providers,
+		"models":          models,
+		"current":         current,
 		"thinking_levels": thinking,
 	})
 }
@@ -905,14 +918,14 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 
 // configDraft 是保存配置的请求体（与 host.ModelConfigurationDraft 对应的小写键 DTO）。
 type configDraft struct {
-	Provider     string               `json:"provider"`
-	Type         string               `json:"type"`
-	API          string               `json:"api"`
-	BaseURL      string               `json:"base_url"`
+	Provider     string                  `json:"provider"`
+	Type         string                  `json:"type"`
+	API          string                  `json:"api"`
+	BaseURL      string                  `json:"base_url"`
 	Models       []bootstrap.ModelConfig `json:"models"`
-	Renames      []host.ModelRename   `json:"renames"`
-	APIKeyAction string               `json:"api_key_action"`
-	APIKey       string               `json:"api_key"`
+	Renames      []host.ModelRename      `json:"renames"`
+	APIKeyAction string                  `json:"api_key_action"`
+	APIKey       string                  `json:"api_key"`
 }
 
 // saveConfigRequest 是保存/测试配置的请求体。
@@ -995,8 +1008,8 @@ func (s *Server) handleDiag(w http.ResponseWriter, r *http.Request) {
 
 // registerSetupRoutes 注册首次引导路由。
 func (s *Server) registerSetupRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/setup/presets", s.handleSetupPresets)
-	mux.HandleFunc("POST /api/setup", s.handleSetupSave)
+	mux.HandleFunc("GET /api/setup/presets", s.guard(s.handleSetupPresets))
+	mux.HandleFunc("POST /api/setup", s.guard(s.handleSetupSave))
 }
 
 // setupPreset 是 Provider 预设的 SSE 载荷（小写键）。
@@ -1058,6 +1071,10 @@ func (s *Server) handleSetupSave(w http.ResponseWriter, r *http.Request) {
 		APIKey:  req.APIKey,
 		BaseURL: strings.TrimSpace(req.BaseURL),
 		Models:  []bootstrap.ModelConfig{{Name: strings.TrimSpace(req.Model)}},
+	}
+	if err := validateBaseURL(pc.BaseURL); err != nil {
+		writeErr(w, http.StatusBadRequest, "%v", err)
+		return
 	}
 	cfg := bootstrap.Config{
 		Provider:  name,

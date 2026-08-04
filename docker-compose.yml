@@ -12,5 +12,7 @@ services:
       - ./workspace:/workspace
     environment:
       - AINOVEL_WEB_PORT=5269
+      # 容器内必须监听所有接口，端口映射才能生效（本机直跑默认 127.0.0.1 更安全）
+      - AINOVEL_WEB_HOST=0.0.0.0
       - AINOVEL_BOOKS_DIR=/workspace/books
     restart: unless-stopped

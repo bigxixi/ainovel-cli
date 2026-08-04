@@ -24,16 +24,17 @@ import (
 //go:embed static
 var staticFS embed.FS
 
-// Server 是 WebUI 的 HTTP 服务器。它持有 BookManager（多书会话管理器），
+// Server 是 WebUI 的 HTTP 服务器。它持有 BookManager（多书会话管理器）与 Auth（单用户鉴权），
 // 通过 REST + SSE 把 ainovel 引擎能力暴露给浏览器。
 type Server struct {
 	books  *BookManager
+	auth   *Auth
 	static http.Handler
 	log    *slog.Logger
 }
 
-// NewServer 构造 Web 服务器。bm 是已初始化（含配置加载）的多书管理器。
-func NewServer(bm *BookManager) *Server {
+// NewServer 构造 Web 服务器。bm 是已初始化（含配置加载）的多书管理器，auth 是已加载的鉴权器。
+func NewServer(bm *BookManager, auth *Auth) *Server {
 	sub, err := fs.Sub(staticFS, "static")
 	if err != nil {
 		// embed 静态目录必须存在，构建期即可发现。
@@ -41,17 +42,29 @@ func NewServer(bm *BookManager) *Server {
 	}
 	return &Server{
 		books:  bm,
+		auth:   auth,
 		static: spaHandler(http.FileServer(http.FS(sub))),
 		log:    slog.Default(),
 	}
 }
 
 // Handler 返回完整路由表。
+// 公开端点：health / auth-status / setup-auth / login / logout（静态页面无需鉴权，页面本身
+// 由前端鉴权引导）；其余 /api/* 一律经 s.guard 校验登录 cookie。
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	// 健康检查（Docker HEALTHCHECK 使用）。
 	mux.HandleFunc("GET /api/health", s.handleHealth)
+	// 鉴权公开端点。
+	mux.HandleFunc("GET /api/auth-status", s.handleAuthStatus)
+	mux.HandleFunc("POST /api/setup-auth", s.handleSetupAuth)
+	mux.HandleFunc("POST /api/login", s.handleLogin)
+	mux.HandleFunc("POST /api/logout", s.handleLogout)
+	// 用户信息与全局配置。
+	mux.HandleFunc("GET /api/profile", s.guard(s.handleProfile))
+	mux.HandleFunc("GET /api/profile/config", s.guard(s.handleProfileConfig))
+	mux.HandleFunc("POST /api/profile/config", s.guard(s.handleProfileConfigSave))
 
 	// 书籍与会话（书架、快照、SSE 事件流）。
 	s.registerBookRoutes(mux)
@@ -61,12 +74,17 @@ func (s *Server) Handler() http.Handler {
 	s.registerImportExportRoutes(mux)
 	// 模型/配置/诊断。
 	s.registerConfigRoutes(mux)
-	// 首次引导。
+	// 首次引导（API key 配置）。
 	s.registerSetupRoutes(mux)
 
 	// 静态单页（SPA 兜底：未匹配的路径回退 index.html）。
 	mux.Handle("/", s.static)
 	return mux
+}
+
+// guard 返回需要登录的 handler 包装。
+func (s *Server) guard(h http.HandlerFunc) http.HandlerFunc {
+	return s.auth.Middleware(h)
 }
 
 // handleHealth 返回服务健康状态与是否处于"需要首次引导"状态。

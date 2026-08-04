@@ -13,6 +13,16 @@ async function api(path, opts = {}) {
     headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
     ...opts,
   });
+  if (res.status === 401) {
+    // 未登录/会话过期：切回登录视图（除登录相关端点外）。
+    if (!path.includes('/login') && !path.includes('/auth-status') && !path.includes('/setup-auth')) {
+      authInfo.authenticated = false;
+      showAuthLogin();
+    }
+    const err = new Error('未登录或会话已过期');
+    err.status = 401;
+    throw err;
+  }
   if (!res.ok) {
     let msg = res.statusText;
     try {
@@ -82,7 +92,7 @@ function fmtBytes(n) {
 
 // ================= 视图切换 =================
 
-const VIEWS = ['shelf', 'workspace', 'setup'];
+const VIEWS = ['shelf', 'workspace', 'setup', 'auth'];
 function showView(name) {
   for (const v of VIEWS) {
     const node = $('#view-' + v);
@@ -147,6 +157,126 @@ function fmtDateTime(iso) {
   return d.toLocaleString('zh-CN', { hour12: false });
 }
 
+// ================= Markdown 渲染 =================
+
+// md 把 markdown 渲染为净化后的 HTML；库缺失时退化为纯文本转义。
+function md(text) {
+  if (text == null) return '';
+  let html = esc(String(text));
+  try {
+    if (window.marked) html = marked.parse(String(text));
+  } catch (_) { /* 解析失败用转义文本 */ }
+  try {
+    if (window.DOMPurify) html = DOMPurify.sanitize(html);
+  } catch (_) { /* sanitize 失败保持现状 */ }
+  return html;
+}
+
+// ================= 鉴权 =================
+
+let authInfo = { configured: false, authenticated: false, display_name: '' };
+
+async function refreshAuthInfo() {
+  try {
+    authInfo = await api('/api/auth-status');
+  } catch (e) {
+    authInfo = { configured: false, authenticated: false, display_name: '' };
+  }
+}
+
+function renderUserArea() {
+  const name = authInfo.display_name || '用户';
+  document.querySelectorAll('.user-badge').forEach((el) => { el.textContent = '👤 ' + name; });
+}
+
+function showAuthSetup() {
+  $('#auth-setup-form').classList.remove('hidden');
+  $('#auth-login-form').classList.add('hidden');
+  $('#auth-error').classList.add('hidden');
+  $('#auth-name').value = '';
+  $('#auth-pw').value = '';
+  showView('auth');
+  $('#auth-name').focus();
+}
+
+function showAuthLogin() {
+  $('#auth-setup-form').classList.add('hidden');
+  $('#auth-login-form').classList.remove('hidden');
+  $('#auth-error').classList.add('hidden');
+  $('#login-pw').value = '';
+  showView('auth');
+  $('#login-pw').focus();
+}
+
+function showAuthError(msg) {
+  const box = $('#auth-error');
+  box.textContent = msg;
+  box.classList.remove('hidden');
+}
+
+// requireAuth 返回是否已通过鉴权；未通过时切到对应鉴权视图。
+async function requireAuth() {
+  await refreshAuthInfo();
+  if (!authInfo.configured) {
+    showAuthSetup();
+    return false;
+  }
+  if (!authInfo.authenticated) {
+    showAuthLogin();
+    return false;
+  }
+  renderUserArea();
+  return true;
+}
+
+async function enterApp() {
+  await refreshAuthInfo();
+  renderUserArea();
+  const health = await api('/api/health');
+  if (health.setup) {
+    showView('setup');
+    await bindSetup();
+    return;
+  }
+  showView('shelf');
+  await loadBooks();
+}
+
+function bindAuth() {
+  $('#setup-auth-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = e.target.querySelector('button[type=submit]');
+    btn.disabled = true;
+    try {
+      await postJSON('/api/setup-auth', {
+        display_name: $('#auth-name').value.trim(),
+        password: $('#auth-pw').value,
+      });
+      await enterApp();
+    } catch (err) {
+      showAuthError(err.message);
+      btn.disabled = false;
+    }
+  });
+  $('#login-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = e.target.querySelector('button[type=submit]');
+    btn.disabled = true;
+    try {
+      await postJSON('/api/login', { password: $('#login-pw').value });
+      await enterApp();
+    } catch (err) {
+      showAuthError(err.message);
+      btn.disabled = false;
+    }
+  });
+  $('#btn-logout').addEventListener('click', async () => {
+    try { await postJSON('/api/logout', {}); } catch (_) { /* 忽略 */ }
+    authInfo.authenticated = false;
+    showAuthLogin();
+  });
+}
+
 // ================= 全局状态 =================
 
 const state = {
@@ -157,6 +287,7 @@ const state = {
   streamRounds: [], // 输出轮次（clear 分轮）
   streamBuf: '',    // 当前轮累积文本
   streamThinking: '',
+  pendingStart: false, // 新建书后引擎启动裁定进行中
 };
 
 // ================= 书架 =================
@@ -231,6 +362,7 @@ function openNewBookModal() {
         prompt: promptInput.value,
       });
       modal.close();
+      state.pendingStart = (mode.value === 'quick');
       if (mode.value === 'cocreate') {
         await openWorkspace(res.book.id);
         openCoCreateModal(true); // 冷启动共创
@@ -241,6 +373,40 @@ function openNewBookModal() {
       toast(e.message, 'error');
       submitBtn.disabled = false;
       submitBtn.textContent = '创建';
+    }
+  });
+}
+
+// 删除当前小说（可保留已完结书）
+function openDeleteBookModal() {
+  const id = state.currentBookId;
+  const keepBox = el('label', { style: 'flex-direction:row;align-items:center;gap:6px' },
+    el('input', { type: 'checkbox' }), ' 保留已完成的小说（仅从书架移除，不删除文件）');
+  const confirmBtn = el('button', { class: 'btn danger', type: 'button', text: '删除' });
+  const cancelBtn = el('button', { class: 'btn', type: 'button', text: '取消' });
+  const modal = openModal({
+    title: '删除当前小说',
+    body: el('div', { class: 'muted', style: 'line-height:1.7' },
+      '确定删除这本书吗？删除后其章节与进度不可恢复。', keepBox),
+    footer: [cancelBtn, confirmBtn],
+  });
+  cancelBtn.addEventListener('click', () => modal.close());
+  confirmBtn.addEventListener('click', async () => {
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = '删除中…';
+    try {
+      const q = keepBox.querySelector('input').checked ? '?keep_completed=1' : '';
+      await api('/api/books/' + id + q, { method: 'DELETE' });
+      modal.close();
+      disconnectStream();
+      stopSnapshotPolling();
+      state.currentBookId = null;
+      showView('shelf');
+      await loadBooks();
+    } catch (e) {
+      toast(e.message, 'error');
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = '删除';
     }
   });
 }
@@ -267,6 +433,10 @@ async function refreshSnapshot() {
   if (!state.currentBookId) return;
   try {
     state.snapshot = await api('/api/books/' + state.currentBookId);
+    // 引擎离开 idle（running/paused/completed）即启动完成，清除启动中提示。
+    if (state.pendingStart && (state.snapshot.IsRunning || state.snapshot.RuntimeState !== 'idle')) {
+      state.pendingStart = false;
+    }
     renderWorkspace();
   } catch (e) {
     toast('快照刷新失败：' + e.message, 'error');
@@ -302,7 +472,11 @@ function renderStatusPill(s) {
 function renderStatePanel(s) {
   const root = $('#state-content');
   root.innerHTML = '';
+  const startBanner = state.pendingStart
+    ? el('div', { class: 'start-banner', text: '⚙ 正在执行启动裁定（通常需 10~60 秒），进度见事件流…' })
+    : null;
   root.append(
+    startBanner,
     statSection('概览', [
       statRow('运行态', s.StatusLabel || s.RuntimeState || '—'),
       statRow('阶段', s.Phase || '—'),
@@ -399,10 +573,12 @@ function renderDetailPanel(s) {
 }
 
 function detailSection(head, text) {
-  return el('div', { class: 'detail-section' },
+  const div = el('div', { class: 'detail-section' },
     el('div', { class: 'head', text: head }),
-    el('div', { class: 'body', text: text == null ? '' : String(text) })
+    el('div', { class: 'body' })
   );
+  div.querySelector('.body').innerHTML = md(text == null ? '' : String(text));
+  return div;
 }
 
 // ---- 中栏：事件流 ----
@@ -425,15 +601,20 @@ function renderEvents() {
 }
 
 // ---- 中栏：输出 ----
-// 流式文本按 ThinkingSep（\x02）分段：奇数段为思考内容，偶数段为正文。
+// 流式文本按 ThinkingSep（\x02）分段：奇数段为思考内容（纯文本），偶数段为正文（markdown 渲染）。
 function renderStreamRound(round) {
   const text = String((round && round.text) || '');
   const parts = text.split('\x02');
   const nodes = [];
   parts.forEach((part, i) => {
     if (!part) return;
-    if (i > 0 && i % 2 !== 0) nodes.push(el('div', { class: 'stream-thinking', text: part }));
-    else nodes.push(el('div', { class: 'stream-round', text: part }));
+    if (i > 0 && i % 2 !== 0) {
+      nodes.push(el('div', { class: 'stream-thinking', text: part }));
+    } else {
+      const div = el('div', { class: 'stream-round' });
+      div.innerHTML = md(part);
+      nodes.push(div);
+    }
   });
   return nodes;
 }
@@ -462,14 +643,12 @@ function bindInput() {
 }
 
 function bindTabs() {
-  document.querySelectorAll('.tab').forEach((t) => {
-    t.addEventListener('click', () => {
-      document.querySelectorAll('.tab').forEach((x) => x.classList.remove('active'));
-      document.querySelectorAll('.tab-panel').forEach((x) => x.classList.remove('active'));
-      t.classList.add('active');
-      const panel = $('#tab-' + t.dataset.tab);
-      if (panel) panel.classList.add('active');
-    });
+  // 事件流/输出同屏：事件流顶部标题点击折叠/展开。
+  const events = $('#center-events');
+  const icon = $('#events-fold-icon');
+  $('#btn-toggle-events').addEventListener('click', () => {
+    const collapsed = events.classList.toggle('collapsed');
+    icon.textContent = collapsed ? '▸' : '▾';
   });
 }
 
@@ -514,6 +693,8 @@ const COMMANDS = {
 
 function runCommand(text) {
   hidePalette();
+  // 命令执行后从输入框消失（不再可编辑）。
+  $('#input').value = '';
   const m = text.slice(1).trim().match(/^([^\s]+)\s*(.*)$/);
   if (!m) return;
   const name = m[1].toLowerCase();
@@ -835,6 +1016,130 @@ async function openDiagModal() {
   }
 }
 
+// ================= 模态框：全局配置（profile） =================
+
+async function openProfileModal() {
+  let prof;
+  try {
+    prof = await api('/api/profile');
+  } catch (e) { toast(e.message, 'error'); return; }
+  let snap;
+  try {
+    snap = await api('/api/profile/config');
+  } catch (e) {
+    if (prof.setup_needed) {
+      openModal({ title: '配置', body: el('p', { class: 'muted', text: '尚未配置 Provider 与模型，请先完成首次引导（/setup）。' }) });
+      return;
+    }
+    toast(e.message, 'error');
+    return;
+  }
+
+  const providers = snap.providers || [];
+  const nameSel = el('select', {},
+    ...providers.map((p) => el('option', { value: p.name, text: p.name })),
+    el('option', { value: '__new__', text: '＋ 新增 Provider' })
+  );
+  const nameInput = el('input', { type: 'text', placeholder: 'Provider 名称（新增时填写）', class: 'hidden' });
+  const typeSel = el('select', {},
+    el('option', { value: 'openai', text: 'OpenAI 兼容' }),
+    el('option', { value: 'anthropic', text: 'Anthropic 兼容' }),
+    el('option', { value: 'gemini', text: 'Gemini 兼容' })
+  );
+  const apiSel = el('select', {},
+    el('option', { value: 'chat', text: 'chat' }),
+    el('option', { value: 'responses', text: 'responses' })
+  );
+  const baseInput = el('input', { type: 'text', placeholder: 'Base URL（留空使用默认）' });
+  const keyHint = el('p', { class: 'muted', text: '' });
+  const keyInput = el('input', { type: 'password', placeholder: '新 API Key（留空保持原样）', autocomplete: 'off' });
+  const clearKey = el('label', { style: 'flex-direction:row;gap:6px' },
+    el('input', { type: 'checkbox' }), ' 清除已存 API Key');
+  const modelsInput = el('textarea', { rows: 5, placeholder: '模型列表，每行一个：\nmodel-name\nmodel-name=128000（可指定上下文窗口）' });
+
+  const fillProvider = () => {
+    const name = nameSel.value;
+    const isNew = name === '__new__';
+    nameInput.classList.toggle('hidden', !isNew);
+    if (isNew) return;
+    const p = providers.find((x) => x.name === name);
+    if (!p) return;
+    typeSel.value = p.type || 'openai';
+    apiSel.value = p.api || 'chat';
+    baseInput.value = p.base_url || '';
+    keyHint.textContent = p.has_api_key ? '已保存 API Key（可替换或清除）' : '未设置 API Key';
+    modelsInput.value = (p.models || []).map((m) =>
+      m.context_window ? `${m.name}=${m.context_window}` : m.name
+    ).join('\n');
+  };
+  nameSel.addEventListener('change', fillProvider);
+
+  const userLine = el('div', { class: 'stat-row' },
+    el('span', { class: 'k', text: '当前用户' }),
+    el('span', { class: 'v', text: authInfo.display_name || '用户' })
+  );
+
+  const saveBtn = el('button', { class: 'btn primary', type: 'button', text: '保存' });
+  const modal = openModal({
+    title: '全局配置',
+    body: el('div', { class: 'setup-wrap', style: 'margin:0;padding:0' },
+      userLine,
+      el('label', { text: 'Provider' }, nameSel),
+      el('label', { text: 'Provider 名称（新增）' }, nameInput),
+      el('label', { text: 'API 协议类型' }, typeSel),
+      el('label', { text: 'API 模式' }, apiSel),
+      el('label', { text: 'Base URL' }, baseInput),
+      keyHint,
+      el('label', { text: 'API Key' }, keyInput),
+      clearKey,
+      el('label', { text: '模型列表' }, modelsInput)
+    ),
+    footer: [saveBtn],
+    onMount: fillProvider,
+  });
+
+  const buildDraft = () => {
+    const isNew = nameSel.value === '__new__';
+    const provider = isNew ? nameInput.value.trim() : nameSel.value;
+    if (!provider) throw new Error('Provider 名称不能为空');
+    const models = [];
+    for (const line of modelsInput.value.split('\n')) {
+      const s = line.trim();
+      if (!s) continue;
+      const eq = s.indexOf('=');
+      if (eq > 0) models.push({ name: s.slice(0, eq).trim(), context_window: parseInt(s.slice(eq + 1), 10) || 0 });
+      else models.push({ name: s });
+    }
+    if (!models.length) throw new Error('至少需要一个模型');
+    return {
+      provider,
+      type: typeSel.value,
+      api: apiSel.value,
+      base_url: baseInput.value.trim(),
+      models,
+      renames: [],
+      api_key_action: clearKey.querySelector('input').checked ? 'clear' : (keyInput.value ? 'replace' : 'keep'),
+      api_key: keyInput.value,
+    };
+  };
+
+  saveBtn.addEventListener('click', async () => {
+    let draft;
+    try { draft = buildDraft(); } catch (e) { toast(e.message, 'error'); return; }
+    saveBtn.disabled = true;
+    saveBtn.textContent = '保存中…';
+    try {
+      await postJSON('/api/profile/config', { draft });
+      toast('配置已保存（全局生效）', 'ok');
+      modal.close();
+    } catch (e) {
+      toast(e.message, 'error');
+      saveBtn.disabled = false;
+      saveBtn.textContent = '保存';
+    }
+  });
+}
+
 // ================= 附加流事件（import/sim/cocreate）分发 =================
 
 // state.auxHandlers 由模态框注册；SSE 收到附加流事件时调用。
@@ -1054,9 +1359,9 @@ function openCoCreateModal(coldStart) {
   let currentReq = null;
   let latestDraft = '';
 
-  const chatBox = el('div', { class: 'scroll-area', style: 'height:280px;border:1px solid var(--border);border-radius:8px;background:var(--bg-3);overflow-y:auto' });
-  const thinkingBox = el('div', { class: 'stream-thinking hidden', style: 'height:70px;overflow-y:auto;border:1px dashed var(--border);border-radius:8px;padding:6px 10px;font-size:12.5px' });
-  const replyBox = el('div', { class: 'muted', style: 'min-height:40px;white-space:pre-wrap' });
+  const chatBox = el('div', { class: 'scroll-area', style: 'flex:1;min-height:0;border:1px solid var(--border);border-radius:8px;background:var(--bg-3);overflow-y:auto;font-size:13px' });
+  const thinkingBox = el('div', { class: 'box-body', text: '（AI 思考中…）' });
+  const draftBox = el('div', { class: 'box-body' });
   const input = el('textarea', { rows: 2, placeholder: '输入你的想法（Enter 发送，Shift+Enter 换行）…' });
   const sendBtn = el('button', { class: 'btn', type: 'button', text: '发送' });
   const applyBtn = el('button', { class: 'btn primary', type: 'button', text: coldStart ? '启动创作' : '应用指令并恢复' });
@@ -1065,40 +1370,67 @@ function openCoCreateModal(coldStart) {
   const modal = openModal({
     title: coldStart ? '共创规划 · 新书' : '共创规划 · 阶段',
     body: el('div', { class: 'setup-wrap', style: 'margin:0;padding:0' },
-      chatBox, thinkingBox, replyBox,
-      el('div', { style: 'display:flex;gap:8px' }, input, sendBtn)
+      el('div', { class: 'cocreate-layout' },
+        // 左：对话历史
+        el('div', { class: 'cocreate-chat' }, chatBox),
+        // 右：思考 + 创作指令草稿
+        el('div', { class: 'cocreate-panel' },
+          el('div', { class: 'box' },
+            el('div', { class: 'box-title', text: 'AI 思考' }),
+            thinkingBox
+          ),
+          el('div', { class: 'box' },
+            el('div', { class: 'box-title', text: '创作指令草稿（Apply 后生效）' }),
+            draftBox
+          )
+        )
+      ),
+      el('div', { style: 'display:flex;gap:8px;margin-top:10px' }, input, sendBtn)
     ),
     footer: [cancelBtn, applyBtn],
     wide: true,
     onMount: () => input.focus(),
   });
 
-  const addChat = (text, cls) => {
-    chatBox.append(el('div', { class: 'ev ' + (cls || ''), text }));
+  const addChat = (node, cls) => {
+    chatBox.append(el('div', { class: 'ev ' + (cls || ''), style: 'border:none' }, node));
     chatBox.scrollTop = chatBox.scrollHeight;
   };
+  const renderDraft = () => {
+    if (latestDraft) {
+      draftBox.innerHTML = md(latestDraft);
+    } else {
+      draftBox.textContent = '（尚无创作指令，继续对话或等待 AI 给出）';
+      draftBox.classList.add('muted');
+    }
+  };
+  renderDraft();
 
   const handler = { kind: 'cocreate', fn: (p) => {
     if (!currentReq || p.req_id !== currentReq) return;
     if (p.kind === 'thinking') {
-      thinkingBox.classList.remove('hidden');
       thinkingBox.textContent = p.text;
     } else if (p.kind === 'reply') {
-      replyBox.textContent = p.text;
+      // 回复预览同步进草稿区（模型边写边看）。
+      draftBox.innerHTML = md(p.text || '');
+      draftBox.classList.remove('muted');
     } else if (p.kind === 'done') {
       const reply = p.reply || {};
-      thinkingBox.classList.add('hidden');
-      replyBox.textContent = reply.Message || '';
+      thinkingBox.textContent = '';
       if (reply.Prompt) latestDraft = reply.Prompt;
+      renderDraft();
       if (reply.Raw || reply.Message) messages.push({ role: 'assistant', content: reply.Raw || reply.Message });
       if (reply.Suggestions && reply.Suggestions.length) {
-        reply.Suggestions.forEach((sg, i) => {
-          addChat(`建议 ${i + 1}：${sg}`, 'muted');
+        const row = el('div', { class: 'suggest-row' });
+        reply.Suggestions.forEach((sg) => {
+          row.append(el('button', { class: 'suggest-btn', type: 'button', text: sg,
+            onclick: () => { input.value = sg; input.focus(); } }));
         });
+        addChat(el('div', {}, '建议：', row), 'muted');
       }
+      addChat('—— AI 回复完成 ——', 'muted');
       currentReq = null;
       sendBtn.disabled = false;
-      addChat('—— AI 回复完成 ——', 'muted');
     } else if (p.kind === 'error') {
       toast('共创失败：' + (p.error || ''), 'error');
       currentReq = null;
@@ -1119,13 +1451,12 @@ function openCoCreateModal(coldStart) {
     messages.push({ role: 'user', content: text });
     addChat('你：' + text);
     sendBtn.disabled = true;
+    thinkingBox.textContent = '（AI 思考中…）';
+    draftBox.textContent = '（等待回复…）';
+    draftBox.classList.add('muted');
     try {
       const res = await postJSON(`/api/books/${id}/cocreate`, { messages, stage: !coldStart });
       currentReq = res.req_id;
-      addChat('AI 思考中…', 'muted');
-      thinkingBox.classList.remove('hidden');
-      thinkingBox.textContent = '';
-      replyBox.textContent = '';
     } catch (e) {
       toast(e.message, 'error');
       sendBtn.disabled = false;
@@ -1143,6 +1474,7 @@ function openCoCreateModal(coldStart) {
       await postJSON(`/api/books/${id}/cocreate/apply`, { draft: latestDraft, stage: !coldStart });
       toast(coldStart ? '创作已启动' : '已恢复创作', 'ok');
       modal.close();
+      state.pendingStart = coldStart;
       await refreshSnapshot();
     } catch (e) {
       toast(e.message, 'error');
@@ -1309,16 +1641,23 @@ function bindTopbar() {
     showView('shelf');
     await loadBooks();
   });
-  // 模型配置在书内可用（书架页提示先打开书）。
-  const needBook = (fn) => () => {
-    if (!state.currentBookId) { toast('请先打开或新建一本书，再使用 /config', 'error'); return; }
-    fn();
-  };
-  $('#btn-shelf-config').addEventListener('click', () => toast('模型配置请先打开一本书（书内 /config）'));
-  $('#btn-ws-config').addEventListener('click', needBook(openConfigModal));
-  $('#btn-models').addEventListener('click', needBook(openModelsModal));
-  $('#btn-diag').addEventListener('click', needBook(openDiagModal));
+  // 配置：全局 Provider/模型/API Key（登录后可用）。
+  $('#btn-shelf-config').addEventListener('click', openProfileModal);
+  $('#btn-ws-config').addEventListener('click', openProfileModal);
+  $('#btn-models').addEventListener('click', () => {
+    if (!state.currentBookId) { toast('请先打开一本书（书内 /model 按角色切换）', 'error'); return; }
+    openModelsModal();
+  });
+  $('#btn-diag').addEventListener('click', () => {
+    if (!state.currentBookId) { toast('请先打开一本书', 'error'); return; }
+    openDiagModal();
+  });
   $('#btn-help').addEventListener('click', openHelpModal);
+  // 删除当前小说。
+  $('#btn-delete-book').addEventListener('click', () => {
+    if (!state.currentBookId) { toast('请先打开一本书', 'error'); return; }
+    openDeleteBookModal();
+  });
   // 暂停/继续（移动端无 Ctrl+C 快捷键，提供可见按钮）。
   $('#btn-pause').addEventListener('click', async () => {
     await postControl('abort');
@@ -1340,7 +1679,11 @@ async function init() {
   bindInput();
   bindTabs();
   bindPalette();
+  bindAuth();
   try {
+    // 鉴权优先：未设置密码 → 设置页；未登录 → 登录页。
+    const ok = await requireAuth();
+    if (!ok) return;
     const health = await api('/api/health');
     if (health.setup) {
       showView('setup');

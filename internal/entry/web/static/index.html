@@ -17,8 +17,10 @@
           <span class="version" id="shelf-version"></span>
         </div>
         <div class="topbar-actions">
+          <span class="user-badge" id="shelf-user" title="当前用户"></span>
+          <button id="btn-shelf-config" class="btn" type="button">配置</button>
           <button id="btn-new-book" class="btn primary" type="button">＋ 新建书</button>
-          <button id="btn-shelf-config" class="btn" type="button">模型配置</button>
+          <button id="btn-logout" class="btn" type="button" title="退出登录">退出</button>
         </div>
       </header>
       <div id="book-list" class="book-list"></div>
@@ -32,6 +34,8 @@
         <div class="book-title" id="ws-title"></div>
         <div class="status-pill" id="ws-status"></div>
         <div class="topbar-actions">
+          <span class="user-badge" id="ws-user" title="当前用户"></span>
+          <button id="btn-delete-book" class="btn danger" type="button" title="删除当前小说">删除</button>
           <button id="btn-models" class="btn" type="button">模型</button>
           <button id="btn-ws-config" class="btn" type="button">配置</button>
           <button id="btn-diag" class="btn" type="button">诊断</button>
@@ -46,16 +50,16 @@
           <div id="state-content" class="panel-body"></div>
         </aside>
 
-        <!-- 中栏：事件流 + 输出 -->
+        <!-- 中栏：事件流（上，可折叠）+ 输出（下，主区） -->
         <main class="center">
-          <div class="tabs">
-            <button class="tab active" data-tab="events" type="button">事件流</button>
-            <button class="tab" data-tab="stream" type="button">输出</button>
-          </div>
-          <div id="tab-events" class="tab-panel active">
+          <div id="center-events" class="center-events">
+            <button id="btn-toggle-events" class="center-title" type="button" title="折叠/展开事件流">
+              <span id="events-fold-icon">▾</span> 事件流
+            </button>
             <div id="events" class="scroll-area"></div>
           </div>
-          <div id="tab-stream" class="tab-panel">
+          <div class="center-stream">
+            <div class="center-title">输出</div>
             <div id="stream" class="scroll-area"></div>
           </div>
         </main>
@@ -68,12 +72,15 @@
       </div>
 
       <footer class="input-bar">
-        <div class="input-actions">
-          <button id="btn-pause" class="btn" type="button" title="暂停引擎">⏸</button>
-          <button id="btn-resume" class="btn" type="button" title="恢复创作">▶</button>
-        </div>
         <textarea id="input" rows="2" placeholder="输入创作指令（/ 查看命令）…"></textarea>
-        <button id="btn-send" class="btn primary" type="button">发送</button>
+        <div class="input-row">
+          <div class="input-actions">
+            <button id="btn-pause" class="btn" type="button" title="暂停引擎">⏸ 暂停</button>
+            <button id="btn-resume" class="btn" type="button" title="恢复创作">▶ 恢复</button>
+            <button id="btn-send" class="btn primary" type="button">发送</button>
+          </div>
+          <span class="input-hint muted">Enter 发送 · Shift+Enter 换行 · / 打开命令面板</span>
+        </div>
       </footer>
     </section>
 
@@ -104,10 +111,41 @@
       </div>
     </section>
 
+    <!-- ============ 鉴权视图（登录 / 首次设置密码） ============ -->
+    <section id="view-auth" class="view hidden">
+      <div class="setup-wrap">
+        <h1>ainovel WebUI</h1>
+        <div id="auth-setup-form" class="hidden">
+          <p class="muted">首次使用，请设置访问密码以保护你的创作数据。</p>
+          <form id="setup-auth-form">
+            <label>显示名
+              <input id="auth-name" placeholder="你的昵称">
+            </label>
+            <label>访问密码
+              <input id="auth-pw" type="password" placeholder="至少 6 位" autocomplete="new-password">
+            </label>
+            <button class="btn primary" type="submit">设置并进入</button>
+          </form>
+        </div>
+        <div id="auth-login-form">
+          <p class="muted">请输入访问密码。</p>
+          <form id="login-form">
+            <label>访问密码
+              <input id="login-pw" type="password" autocomplete="current-password">
+            </label>
+            <button class="btn primary" type="submit">登录</button>
+          </form>
+        </div>
+        <p id="auth-error" class="error hidden"></p>
+      </div>
+    </section>
+
     <!-- 模态框与提示容器 -->
     <div id="modal-root"></div>
     <div id="toast-root"></div>
   </div>
+  <script src="/vendor/marked.min.js"></script>
+  <script src="/vendor/purify.min.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>
