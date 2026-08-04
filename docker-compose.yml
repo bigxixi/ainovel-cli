@@ -3,8 +3,14 @@ services:
     image: ghcr.io/voocel/ainovel-cli:latest
     build:
       context: .
+    ports:
+      - "5269:5269"
     volumes:
+      # 配置目录（含首次引导生成的 config.json 与全局写作偏好）
       - ./config:/root/.ainovel
+      # 书架目录：每本书一个子目录（AINOVEL_BOOKS_DIR=/workspace/books）
       - ./workspace:/workspace
-    stdin_open: true
-    tty: true
+    environment:
+      - AINOVEL_WEB_PORT=5269
+      - AINOVEL_BOOKS_DIR=/workspace/books
+    restart: unless-stopped

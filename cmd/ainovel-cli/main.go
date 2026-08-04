@@ -11,6 +11,7 @@ import (
 	"github.com/voocel/ainovel-cli/internal/bootstrap"
 	"github.com/voocel/ainovel-cli/internal/entry/headless"
 	"github.com/voocel/ainovel-cli/internal/entry/tui"
+	"github.com/voocel/ainovel-cli/internal/entry/web"
 	"github.com/voocel/ainovel-cli/internal/eval"
 	"github.com/voocel/ainovel-cli/internal/rules"
 	buildversion "github.com/voocel/ainovel-cli/internal/version"
@@ -29,6 +30,12 @@ func main() {
 	// 子命令在常规 flag 解析之前拦截：eval 是离线评测 harness，参数体系独立。
 	if len(os.Args) > 1 && os.Args[1] == "eval" {
 		os.Exit(eval.Command(os.Args[2:]))
+	}
+
+	// web 子命令：启动 WebUI 服务器（参数体系独立，见 internal/entry/web）。
+	if len(os.Args) > 1 && os.Args[1] == "web" {
+		runWeb(os.Args[2:])
+		return
 	}
 
 	opts, args, err := parseCLIOptions(os.Args[1:])
@@ -199,6 +206,13 @@ func versionInfo() buildversion.Info {
 		Commit:  commit,
 		Date:    date,
 	})
+}
+
+// runWeb 是 web 子命令入口的包装：启动 WebUI 服务器，错误统一走 die。
+func runWeb(argv []string) {
+	if err := web.Command(argv, versionInfo()); err != nil {
+		die("web: %v", err)
+	}
 }
 
 func runSelfUpdate(target string) error {

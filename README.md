@@ -242,6 +242,17 @@ docker compose run --rm ainovel
 docker compose run --rm ainovel --headless --prompt "写一本悬疑短篇"
 ```
 
+#### WebUI（网页版）
+
+镜像默认以 WebUI 模式启动（端口 **5269**），浏览器打开 `http://localhost:5269` 即可使用完整功能（书架、创作工作台、导入导出、共创规划），并支持手机/平板访问：
+
+```bash
+docker compose up -d          # 后台启动 WebUI
+docker compose logs -f ainovel # 查看日志
+```
+
+详见 [docs/webui.md](docs/webui.md)：环境变量、TUI 命令与 Web 操作的功能映射、移动端使用说明。
+
 进入 TUI 后，启动阶段支持两种前置交互：
 
 - `快速开始`：一句话直接进入创作

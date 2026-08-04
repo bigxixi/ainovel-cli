@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <title>ainovel WebUI</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div id="app">
+
+    <!-- ============ 书架视图 ============ -->
+    <section id="view-shelf" class="view">
+      <header class="topbar">
+        <div class="brand">ainovel <span class="brand-sub">AI 小说创作工作台</span>
+          <span class="version" id="shelf-version"></span>
+        </div>
+        <div class="topbar-actions">
+          <button id="btn-new-book" class="btn primary" type="button">＋ 新建书</button>
+          <button id="btn-shelf-config" class="btn" type="button">模型配置</button>
+        </div>
+      </header>
+      <div id="book-list" class="book-list"></div>
+      <p id="shelf-empty" class="muted center hidden">书架空空如也——点击「新建书」开始你的创作。</p>
+    </section>
+
+    <!-- ============ 工作台视图 ============ -->
+    <section id="view-workspace" class="view hidden">
+      <header class="topbar">
+        <button id="btn-back" class="btn" type="button" title="返回书架">← 书架</button>
+        <div class="book-title" id="ws-title"></div>
+        <div class="status-pill" id="ws-status"></div>
+        <div class="topbar-actions">
+          <button id="btn-models" class="btn" type="button">模型</button>
+          <button id="btn-ws-config" class="btn" type="button">配置</button>
+          <button id="btn-diag" class="btn" type="button">诊断</button>
+          <button id="btn-help" class="btn" type="button">帮助</button>
+        </div>
+      </header>
+
+      <div class="workspace">
+        <!-- 左栏：状态 -->
+        <aside id="panel-state" class="panel state-panel">
+          <div class="panel-title">状态</div>
+          <div id="state-content" class="panel-body"></div>
+        </aside>
+
+        <!-- 中栏：事件流 + 输出 -->
+        <main class="center">
+          <div class="tabs">
+            <button class="tab active" data-tab="events" type="button">事件流</button>
+            <button class="tab" data-tab="stream" type="button">输出</button>
+          </div>
+          <div id="tab-events" class="tab-panel active">
+            <div id="events" class="scroll-area"></div>
+          </div>
+          <div id="tab-stream" class="tab-panel">
+            <div id="stream" class="scroll-area"></div>
+          </div>
+        </main>
+
+        <!-- 右栏：详情 -->
+        <aside id="panel-detail" class="panel detail-panel">
+          <div class="panel-title">详情</div>
+          <div id="detail-content" class="panel-body"></div>
+        </aside>
+      </div>
+
+      <footer class="input-bar">
+        <div class="input-actions">
+          <button id="btn-pause" class="btn" type="button" title="暂停引擎">⏸</button>
+          <button id="btn-resume" class="btn" type="button" title="恢复创作">▶</button>
+        </div>
+        <textarea id="input" rows="2" placeholder="输入创作指令（/ 查看命令）…"></textarea>
+        <button id="btn-send" class="btn primary" type="button">发送</button>
+      </footer>
+    </section>
+
+    <!-- ============ 首次引导视图 ============ -->
+    <section id="view-setup" class="view hidden">
+      <div class="setup-wrap">
+        <h1>ainovel WebUI 初始化</h1>
+        <p class="muted">尚未检测到配置文件，先配置一个模型 Provider。</p>
+        <form id="setup-form">
+          <label>1. Provider
+            <select id="setup-provider" required></select>
+          </label>
+          <label>Provider 名称（自定义代理时）
+            <input id="setup-provider-name" placeholder="my-proxy">
+          </label>
+          <label>2. API Key（可留空）
+            <input id="setup-apikey" placeholder="sk-xxx" autocomplete="off">
+          </label>
+          <label>3. Base URL（留空使用官方地址）
+            <input id="setup-baseurl" placeholder="https://openrouter.ai/api/v1">
+          </label>
+          <label>4. 模型名称
+            <input id="setup-model" placeholder="gpt-4o / claude-sonnet-4 / gemini-2.5-pro" required>
+          </label>
+          <button class="btn primary" type="submit">保存配置</button>
+          <p id="setup-error" class="error hidden"></p>
+        </form>
+      </div>
+    </section>
+
+    <!-- 模态框与提示容器 -->
+    <div id="modal-root"></div>
+    <div id="toast-root"></div>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>

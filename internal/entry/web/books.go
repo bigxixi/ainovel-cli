@@ -1,0 +1,394 @@
+package web
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/voocel/ainovel-cli/assets"
+	"github.com/voocel/ainovel-cli/internal/bootstrap"
+	"github.com/voocel/ainovel-cli/internal/entry/startup"
+	"github.com/voocel/ainovel-cli/internal/host"
+	"github.com/voocel/ainovel-cli/internal/logger"
+)
+
+// booksFileName 是书架清单文件名（位于书架根目录）。
+const booksFileName = "books.json"
+
+// BookMeta 是 books.json 中持久化的书清单条目。
+type BookMeta struct {
+	ID        string    `json:"id"`
+	Title     string    `json:"title"`
+	Dir       string    `json:"dir"` // 相对书架根目录的子目录名
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// Book 是运行中的书会话：一个 host.Host 实例 + 事件广播 hub。
+type Book struct {
+	Meta       BookMeta
+	host       *host.Host
+	hub        *StreamHub
+	logCleanup func() // 书日志文件关闭函数（Close 时调用）
+
+	cancelMu sync.Mutex
+	auxCancel context.CancelFunc // 当前附加操作（导入/仿写/共创）的取消函数（可空）
+}
+
+// setAuxCancel 登记当前附加操作的取消函数（导入/仿写/共创）。
+func (b *Book) setAuxCancel(cancel context.CancelFunc) {
+	b.cancelMu.Lock()
+	defer b.cancelMu.Unlock()
+	b.auxCancel = cancel
+}
+
+// CancelAux 取消当前附加操作（无则忽略）。
+func (b *Book) CancelAux() {
+	b.cancelMu.Lock()
+	defer b.cancelMu.Unlock()
+	if b.auxCancel != nil {
+		b.auxCancel()
+		b.auxCancel = nil
+	}
+}
+
+// BookManager 管理多本书。每本书对应书架根目录下的一个子目录，
+// 且同一时刻只存在一个 host.Host 实例（flock book lease 语义保证跨进程独占）。
+//
+// 并发模型：bm.mu 保护 books 映射与生命周期；host.Host 自身并发安全；
+// StreamHub 每书一个消费 goroutine，把 Events()/Stream()/Done() 广播给订阅者。
+type BookManager struct {
+	mu        sync.Mutex
+	cfgLoader func() (bootstrap.Config, error) // 每次创建书时加载最新配置（/api/setup 后可生效）
+	booksDir  string
+	books     map[string]*Book
+	closed    bool
+}
+
+// NewBookManager 构造多书管理器。booksDir 是书架根目录，不存在则创建。
+// cfgLoader 在每次创建书会话时调用，保证 /api/setup 或改配置后无需重启。
+func NewBookManager(cfgLoader func() (bootstrap.Config, error), booksDir string) (*BookManager, error) {
+	if cfgLoader == nil {
+		return nil, fmt.Errorf("配置加载器为空")
+	}
+	if booksDir == "" {
+		return nil, fmt.Errorf("书架目录为空")
+	}
+	if err := os.MkdirAll(booksDir, 0o755); err != nil {
+		return nil, fmt.Errorf("创建书架目录 %q: %w", booksDir, err)
+	}
+	return &BookManager{
+		cfgLoader: cfgLoader,
+		booksDir:  booksDir,
+		books:     make(map[string]*Book),
+	}, nil
+}
+
+// BooksDir 返回书架根目录。
+func (bm *BookManager) BooksDir() string { return bm.booksDir }
+
+// CreateRequest 是新建书的请求（快速模式）。
+type CreateRequest struct {
+	Title  string
+	Prompt string // 用户原始创作需求
+}
+
+// Create 新建一本快速模式的书并立即启动引擎（同步执行 Arbiter 启动裁定）。
+func (bm *BookManager) Create(req CreateRequest) (*Book, error) {
+	plan, err := startup.PrepareQuick(startup.Request{
+		Mode:        startup.ModeQuick,
+		UserPrompt:  req.Prompt,
+		Interactive: true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("创作需求无效: %w", err)
+	}
+
+	bm.mu.Lock()
+	book, err := bm.createSessionLocked(req.Title)
+	bm.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+
+	// 用户规则快照须在 StartPrepared 之前（与 headless 流程一致）。
+	if err := book.host.PrepareUserRules(plan.RawPrompt); err != nil {
+		bm.removeBook(book)
+		return nil, fmt.Errorf("准备用户规则: %w", err)
+	}
+	if err := book.host.StartPrepared(plan.RawPrompt); err != nil {
+		bm.removeBook(book)
+		return nil, fmt.Errorf("启动创作引擎: %w", err)
+	}
+	return book, nil
+}
+
+// CreateEmpty 创建一本空书会话（host.New 但引擎不启动），
+// 供共创规划等"先建会话、后启动"的路径使用；随后用 StartWithPrompt 启动。
+func (bm *BookManager) CreateEmpty(title string) (*Book, error) {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+	return bm.createSessionLocked(title)
+}
+
+// StartWithPrompt 用给定 prompt 启动一本书的引擎（冷启动共创的 Apply 路径）。
+func (bm *BookManager) StartWithPrompt(book *Book, prompt string) error {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return fmt.Errorf("创作需求不能为空")
+	}
+	if err := book.host.PrepareUserRules(prompt); err != nil {
+		return fmt.Errorf("准备用户规则: %w", err)
+	}
+	if err := book.host.StartPrepared(prompt); err != nil {
+		return fmt.Errorf("启动创作引擎: %w", err)
+	}
+	return nil
+}
+
+// createSessionLocked 创建书会话并注册到书架（host.New + hub + books.json），不启动引擎。
+// 调用方须持 bm.mu。
+func (bm *BookManager) createSessionLocked(title string) (*Book, error) {
+	if bm.closed {
+		return nil, errors.New("book manager 已关闭")
+	}
+	cfg, err := bm.cfgLoader()
+	if err != nil {
+		return nil, err
+	}
+
+	id := newBookID()
+	dir := filepath.Join(bm.booksDir, id)
+	cfg.OutputDir = dir // 本书目录
+
+	// 文风资源按本书配置加载（style 与书目录 style/ 覆盖层随之生效）。
+	bundle := assets.Load(cfg.Style, assets.DefaultLoadOptions(dir))
+
+	eng, err := host.New(cfg, bundle)
+	if err != nil {
+		return nil, err
+	}
+	logCleanup, err := logger.SetupFile(dir, "web.log", false)
+	if err != nil {
+		slog.Warn("web: 书日志不可用，继续运行", "book", id, "err", err)
+		logCleanup = func() {}
+	}
+
+	book := &Book{
+		Meta:       BookMeta{ID: id, Title: strings.TrimSpace(title), Dir: id, CreatedAt: time.Now()},
+		host:       eng,
+		hub:        newStreamHub(eng),
+		logCleanup: logCleanup,
+	}
+	if book.Meta.Title == "" {
+		book.Meta.Title = "未命名小说"
+	}
+	go book.hub.Run()
+	bm.books[id] = book
+
+	// 持久化书架清单；失败则回滚（关闭引擎、清理目录），避免"在跑但不在书架"。
+	metas, err := bm.loadBooks()
+	if err == nil {
+		metas = append(metas, book.Meta)
+		err = bm.saveBooks(metas)
+	}
+	if err != nil {
+		delete(bm.books, id)
+		book.hub.Close()
+		eng.Close()
+		if logCleanup != nil {
+			logCleanup()
+		}
+		os.RemoveAll(dir)
+		return nil, fmt.Errorf("写入书架清单: %w", err)
+	}
+	return book, nil
+}
+
+// removeBook 从书架移除书会话、清理目录并同步清单（启动失败回滚用）。
+func (bm *BookManager) removeBook(book *Book) {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+	delete(bm.books, book.Meta.ID)
+	book.hub.Close()
+	book.host.Close()
+	if book.logCleanup != nil {
+		book.logCleanup()
+	}
+	os.RemoveAll(filepath.Join(bm.booksDir, book.Meta.Dir))
+	// 同步书架清单，避免"僵尸书"残留（书打不开也删不掉）。
+	if metas, err := bm.loadBooks(); err == nil {
+		filtered := metas[:0]
+		for _, m := range metas {
+			if m.ID != book.Meta.ID {
+				filtered = append(filtered, m)
+			}
+		}
+		if len(filtered) != len(metas) {
+			if err := bm.saveBooks(filtered); err != nil {
+				slog.Warn("web: 移除书清单条目失败", "book", book.Meta.ID, "err", err)
+			}
+		}
+	}
+}
+
+// Get 打开（或复用）一本书。已打开的会话直接返回；
+// 未打开则创建 host.Host 会话并启动事件广播（引擎不自动恢复，由用户操作触发）。
+func (bm *BookManager) Get(id string) (*Book, error) {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+	if bm.closed {
+		return nil, errors.New("book manager 已关闭")
+	}
+	if b, ok := bm.books[id]; ok {
+		return b, nil
+	}
+
+	meta, err := bm.findMetaLocked(id)
+	if err != nil {
+		return nil, err
+	}
+	if meta == nil {
+		return nil, fmt.Errorf("书架中不存在书 %q", id)
+	}
+	// 防御：目录名必须是单段相对路径，拒绝路径穿越。
+	if meta.Dir == "" || filepath.Base(meta.Dir) != meta.Dir {
+		return nil, fmt.Errorf("非法书目录名 %q", meta.Dir)
+	}
+
+	dir := filepath.Join(bm.booksDir, meta.Dir)
+	if st, err := os.Stat(dir); err != nil || !st.IsDir() {
+		return nil, fmt.Errorf("书目录不存在: %s", dir)
+	}
+
+	cfg, err := bm.cfgLoader()
+	if err != nil {
+		return nil, err
+	}
+	cfg.OutputDir = dir
+
+	// 文风资源按本书配置加载（与 createSessionLocked 一致）。
+	bundle := assets.Load(cfg.Style, assets.DefaultLoadOptions(dir))
+
+	eng, err := host.New(cfg, bundle)
+	if err != nil {
+		return nil, err
+	}
+	logCleanup, err := logger.SetupFile(dir, "web.log", false)
+	if err != nil {
+		slog.Warn("web: 书日志不可用，继续运行", "book", id, "err", err)
+		logCleanup = func() {}
+	}
+
+	book := &Book{Meta: *meta, host: eng, hub: newStreamHub(eng), logCleanup: logCleanup}
+	go book.hub.Run()
+	bm.books[id] = book
+	return book, nil
+}
+
+// List 返回书架清单（books.json 内容，按创建时间排序）。
+func (bm *BookManager) List() ([]BookMeta, error) {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+	return bm.loadBooks()
+}
+
+// IsOpen 返回书会话是否已打开（在内存中）。
+func (bm *BookManager) IsOpen(id string) bool {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+	_, ok := bm.books[id]
+	return ok
+}
+
+// findMetaLocked 在清单中查找书元信息（调用方须持锁）。
+func (bm *BookManager) findMetaLocked(id string) (*BookMeta, error) {
+	metas, err := bm.loadBooks()
+	if err != nil {
+		return nil, err
+	}
+	for i := range metas {
+		if metas[i].ID == id {
+			return &metas[i], nil
+		}
+	}
+	return nil, nil
+}
+
+// loadBooks 读取书架清单（books.json）。文件不存在时返回空列表。
+func (bm *BookManager) loadBooks() ([]BookMeta, error) {
+	data, err := os.ReadFile(filepath.Join(bm.booksDir, booksFileName))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var f struct {
+		Books []BookMeta `json:"books"`
+	}
+	if err := json.Unmarshal(data, &f); err != nil {
+		return nil, fmt.Errorf("解析书架清单: %w", err)
+	}
+	return f.Books, nil
+}
+
+// saveBooks 写回书架清单。
+func (bm *BookManager) saveBooks(books []BookMeta) error {
+	payload := struct {
+		Books []BookMeta `json:"books"`
+	}{Books: books}
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(bm.booksDir, booksFileName), data, 0o644)
+}
+
+// Close 关闭所有运行中的书并释放目录锁。幂等。
+func (bm *BookManager) Close() {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+	if bm.closed {
+		return
+	}
+	for id, b := range bm.books {
+		if b != nil && b.hub != nil {
+			b.hub.Close()
+		}
+		if b != nil && b.host != nil {
+			b.host.Close()
+		}
+		if b != nil && b.logCleanup != nil {
+			b.logCleanup()
+		}
+		delete(bm.books, id)
+	}
+	bm.closed = true
+}
+
+// newBookID 生成书 ID：时间戳 + 随机后缀，避免并发创建冲突。
+func newBookID() string {
+	buf := make([]byte, 3)
+	if _, err := rand.Read(buf); err != nil {
+		return time.Now().Format("20060102-150405-000")
+	}
+	return time.Now().Format("20060102-150405") + "-" + hex.EncodeToString(buf)
+}
+
+// newReqID 生成附加操作（导入/仿写/共创）的请求 ID。
+func newReqID() string {
+	buf := make([]byte, 4)
+	if _, err := rand.Read(buf); err != nil {
+		return time.Now().Format("150405.000")
+	}
+	return hex.EncodeToString(buf)
+}
