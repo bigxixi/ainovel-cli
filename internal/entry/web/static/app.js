@@ -122,9 +122,9 @@ function openModal({ title, body, footer, onMount, onClose, wide }) {
       el('h3', { text: title || '' }),
       el('button', { class: 'modal-close', type: 'button', text: '✕', onclick: () => close() })
     ),
-    el('div', { class: 'modal-body' }, body || ''),
-    footer ? el('div', { class: 'modal-footer' }, footer) : null
+    el('div', { class: 'modal-body' }, body || '')
   );
+  if (footer) m.append(el('div', { class: 'modal-footer' }, footer));
   modalBackdrop.addEventListener('click', (e) => { if (e.target === modalBackdrop) close(); });
   modalBackdrop.append(m);
   $('#modal-root').append(modalBackdrop);
@@ -475,8 +475,9 @@ function renderStatePanel(s) {
   const startBanner = state.pendingStart
     ? el('div', { class: 'start-banner', text: '⚙ 正在执行启动裁定（通常需 10~60 秒），进度见事件流…' })
     : null;
+  // 原生 append 会把 null 渲染成 "null" 文本：banner 单独条件追加。
+  if (startBanner) root.append(startBanner);
   root.append(
-    startBanner,
     statSection('概览', [
       statRow('运行态', s.StatusLabel || s.RuntimeState || '—'),
       statRow('阶段', s.Phase || '—'),
@@ -727,7 +728,8 @@ function buildPalette() {
   if (paletteEl) return paletteEl;
   paletteEl = el('div', { class: 'palette hidden', id: 'palette' });
   const bar = $('.input-bar');
-  if (bar) bar.before(paletteEl);
+  // 作为 input-bar 的第一个子元素：palette 的 absolute 定位以 .input-bar（relative）为上下文。
+  if (bar) bar.prepend(paletteEl);
   return paletteEl;
 }
 
