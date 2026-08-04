@@ -264,7 +264,7 @@ curl -fsSL https://get.docker.com | sh
 systemctl enable --now docker
 
 # 2. 拉取镜像（正式仓库；fork/私有源替换为对应 ghcr.io 地址）
-docker pull ghcr.io/voocel/ainovel-cli:v0.8.0
+docker pull ghcr.io/voocel/ainovel-cli:v0.7.5-webui
 
 # 3. 准备持久化目录（配置 + 书架）
 mkdir -p ~/ainovel/config ~/ainovel/workspace
@@ -277,7 +277,7 @@ docker run -d --name ainovel --restart unless-stopped \
   -e AINOVEL_BOOKS_DIR=/workspace/books \
   -v ~/ainovel/config:/root/.ainovel \
   -v ~/ainovel/workspace:/workspace \
-  ghcr.io/voocel/ainovel-cli:v0.8.0
+  ghcr.io/voocel/ainovel-cli:v0.7.5-webui
 
 # 5. 首次使用
 #    浏览器打开 http://<VPS_IP>:5269
