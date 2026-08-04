@@ -226,13 +226,13 @@ mkdir -p config workspace
 docker run --rm -it \
   -v "$PWD/config:/root/.ainovel" \
   -v "$PWD/workspace:/workspace" \
-  ghcr.io/voocel/ainovel-cli:latest
+  ghcr.io/bigxixi/ainovel-cli:latest
 
 # Headless
 docker run --rm \
   -v "$PWD/config:/root/.ainovel" \
   -v "$PWD/workspace:/workspace" \
-  ghcr.io/voocel/ainovel-cli:latest \
+  ghcr.io/bigxixi/ainovel-cli:latest \
   --headless --prompt "写一本东方玄幻长篇，主角从边陲小城起步"
 ```
 
@@ -263,8 +263,8 @@ docker compose logs -f ainovel # 查看日志
 curl -fsSL https://get.docker.com | sh
 systemctl enable --now docker
 
-# 2. 拉取镜像（正式仓库；fork/私有源替换为对应 ghcr.io 地址）
-docker pull ghcr.io/voocel/ainovel-cli:v0.7.5-webui
+# 2. 拉取镜像（本 WebUI 分支由 bigxixi/ainovel-cli 发布；若使用官方上游镜像请换回 ghcr.io/voocel/ainovel-cli）
+docker pull ghcr.io/bigxixi/ainovel-cli:v0.7.5-webui
 
 # 3. 准备持久化目录（配置 + 书架）
 mkdir -p ~/ainovel/config ~/ainovel/workspace
@@ -277,7 +277,7 @@ docker run -d --name ainovel --restart unless-stopped \
   -e AINOVEL_BOOKS_DIR=/workspace/books \
   -v ~/ainovel/config:/root/.ainovel \
   -v ~/ainovel/workspace:/workspace \
-  ghcr.io/voocel/ainovel-cli:v0.7.5-webui
+  ghcr.io/bigxixi/ainovel-cli:v0.7.5-webui
 
 # 5. 首次使用
 #    浏览器打开 http://<VPS_IP>:5269
@@ -287,7 +287,7 @@ docker run -d --name ainovel --restart unless-stopped \
 升级到新版本：
 
 ```bash
-docker pull ghcr.io/voocel/ainovel-cli:latest
+docker pull ghcr.io/bigxixi/ainovel-cli:latest
 docker rm -f ainovel
 docker run -d --name ainovel --restart unless-stopped \
   -p 5269:5269 \
@@ -295,7 +295,7 @@ docker run -d --name ainovel --restart unless-stopped \
   -e AINOVEL_BOOKS_DIR=/workspace/books \
   -v ~/ainovel/config:/root/.ainovel \
   -v ~/ainovel/workspace:/workspace \
-  ghcr.io/voocel/ainovel-cli:latest
+  ghcr.io/bigxixi/ainovel-cli:latest
 ```
 
 > 安全提示：容器默认监听 `0.0.0.0:5269`（`AINOVEL_WEB_HOST`），公网部署务必先设置访问密码；
