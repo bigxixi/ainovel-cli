@@ -662,6 +662,14 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// 预检：外部小说导入仅支持空书（imp/state.go 对非空书籍硬性拒绝，
+	// 提前返回明确错误，避免用户看到"失败+重试"的无效循环）。
+	if snap := book.host.Snapshot(); snap.CompletedCount > 0 {
+		writeErr(w, http.StatusConflict,
+			"该书已有 %d 个完成章节：外部小说导入仅支持空书，请新建一本书后再导入",
+			snap.CompletedCount)
+		return
+	}
 	opts := imp.Options{
 		SourcePath:      sourcePath,
 		AutoConfirm:     req.AutoConfirm,
