@@ -4,6 +4,10 @@ WORKDIR /src
 
 ENV CGO_ENABLED=0 GOWORK=off
 
+# 允许构建时覆盖 Go 模块代理（国内网络可传 --build-arg GOPROXY=https://goproxy.cn,direct）。
+ARG GOPROXY=https://proxy.golang.org,direct
+ENV GOPROXY=$GOPROXY
+
 ARG TARGETOS
 ARG TARGETARCH
 
