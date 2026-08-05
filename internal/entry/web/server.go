@@ -161,7 +161,7 @@ func (s *Server) handleSetupAuth(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "%v", err)
 		return
 	}
-	// 在 SetupAdmin 内已创建 session，仅需设置 cookie。
+	// Cookie 必须在 writeJSON 前设置（WriteHeader 后 header 变更无效）。
 	SetSessionCookie(w, token)
 	writeJSON(w, 200, map[string]any{
 		"configured":   true,
