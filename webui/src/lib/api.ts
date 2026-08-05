@@ -53,12 +53,12 @@ export const api = {
   authStatus: () => request<AuthStatus>('/auth-status'),
 
   setupAuth: (req: SetupAuthRequest) =>
-    request<AuthStatus>('/setup/auth', { method: 'POST', body: JSON.stringify(req) }),
+    request<AuthStatus>('/setup-auth', { method: 'POST', body: JSON.stringify(req) }),
 
   login: (req: LoginRequest) =>
-    request<AuthStatus>('/auth/login', { method: 'POST', body: JSON.stringify(req) }),
+    request<AuthStatus>('/login', { method: 'POST', body: JSON.stringify(req) }),
 
-  logout: () => requestRaw<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
+  logout: () => requestRaw<{ ok: boolean }>('/logout', { method: 'POST' }),
 }
 
 // ---------- 书架 ----------
@@ -112,12 +112,13 @@ export const tools = {
     request<{ ok: boolean; stream_url: string }>(`/books/${bookId}/importsim`, { method: 'POST', body: JSON.stringify({ text }) }),
 
   cancelAux: (bookId: string) =>
-    request<{ ok: boolean }>(`/books/${bookId}/cancel`, { method: 'POST' }),
+    request<{ ok: boolean }>(`/books/${bookId}/import/cancel`, { method: 'POST' }),
 
   export_: (bookId: string, req?: ExportRequest) =>
     request<{ ok: boolean; file: string; url: string }>(`/books/${bookId}/export`, { method: 'POST', body: JSON.stringify(req || {}) }),
 
-  exportURL: (bookId: string, file: string) => `${BASE}/books/${bookId}/export/${file}`,
+  exportURL: (bookId: string, file: string) =>
+    `${BASE}/books/${bookId}/export-file?name=${encodeURIComponent(file)}`,
 }
 
 // ---------- 共创 ----------
