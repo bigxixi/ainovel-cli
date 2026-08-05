@@ -65,6 +65,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/profile", s.guard(s.handleProfile))
 	mux.HandleFunc("GET /api/profile/config", s.guard(s.handleProfileConfig))
 	mux.HandleFunc("POST /api/profile/config", s.guard(s.handleProfileConfigSave))
+	// 管理员端点。
+	mux.HandleFunc("GET /api/admin/users", s.adminGuard(s.handleAdminUsers))
+	mux.HandleFunc("POST /api/admin/users", s.adminGuard(s.handleAdminCreateUser))
+	mux.HandleFunc("PUT /api/admin/users/{id}", s.adminGuard(s.handleAdminUpdateUser))
+	mux.HandleFunc("DELETE /api/admin/users/{id}", s.adminGuard(s.handleAdminDeleteUser))
 
 	// 书籍与会话（书架、快照、SSE 事件流）。
 	s.registerBookRoutes(mux)
@@ -85,6 +90,11 @@ func (s *Server) Handler() http.Handler {
 // guard 返回需要登录的 handler 包装。
 func (s *Server) guard(h http.HandlerFunc) http.HandlerFunc {
 	return s.auth.Middleware(h)
+}
+
+// adminGuard 需要管理员权限的 handler 包装。
+func (s *Server) adminGuard(h http.HandlerFunc) http.HandlerFunc {
+	return s.auth.AdminMiddleware(h)
 }
 
 // handleHealth 返回服务健康状态与是否处于"需要首次引导"状态。
@@ -112,6 +122,236 @@ func spaHandler(fs http.Handler) http.Handler {
 		}
 		fs.ServeHTTP(w, r)
 	})
+}
+
+// ---------- 认证处理 ----------
+
+func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
+	uid := s.auth.Validate(r)
+	out := map[string]any{
+		"configured": s.auth.IsConfigured(),
+		"logged_in":  uid != "",
+	}
+	if uid != "" {
+		u, _ := s.auth.db.GetUserByID(uid)
+		if u != nil {
+			out["display_name"] = u.DisplayName
+			out["role"] = u.Role
+			out["user_id"] = u.ID
+		}
+	}
+	writeJSON(w, 200, out)
+}
+
+func (s *Server) handleSetupAuth(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		DisplayName string `json:"display_name"`
+		Password    string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, "请求格式错误")
+		return
+	}
+	if s.auth.IsConfigured() {
+		writeErr(w, 409, "已配置，不能重复初始化")
+		return
+	}
+	user, err := s.auth.SetupAdmin(req.DisplayName, req.Password)
+	if err != nil {
+		writeErr(w, 400, "%v", err)
+		return
+	}
+	// 自动登录
+	token, _, _ := s.auth.Login(req.Password)
+	SetSessionCookie(w, token)
+	writeJSON(w, 200, map[string]any{
+		"configured":   true,
+		"logged_in":    true,
+		"display_name": user.DisplayName,
+		"role":         user.Role,
+	})
+}
+
+func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	ip := ipFromRequest(r)
+	if s.auth.RecordFailure(ip) {
+		writeErr(w, 429, "登录过于频繁，请 5 分钟后再试")
+		return
+	}
+	var req struct{ Password string `json:"password"` }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, "请求格式错误")
+		return
+	}
+	token, user, err := s.auth.Login(req.Password)
+	if err != nil {
+		writeErr(w, 401, "%v", err)
+		return
+	}
+	s.auth.ClearFailures(ip)
+	SetSessionCookie(w, token)
+	writeJSON(w, 200, map[string]any{
+		"logged_in":    true,
+		"display_name": user.DisplayName,
+		"role":         user.Role,
+	})
+}
+
+func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	s.auth.Logout(r)
+	ClearSessionCookie(w)
+	writeJSON(w, 200, map[string]string{"ok": "true"})
+}
+
+func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
+	uid := UserIDFromContext(r.Context())
+	u, err := s.auth.db.GetUserByID(uid)
+	if err != nil || u == nil {
+		writeErr(w, 404, "用户不存在")
+		return
+	}
+	cfg, _ := s.auth.db.GetUserConfig(uid)
+	out := map[string]any{
+		"user_id":      u.ID,
+		"display_name": u.DisplayName,
+		"role":         u.Role,
+		"created_at":   u.CreatedAt.Format(time.RFC3339),
+	}
+	if cfg != nil {
+		out["provider"] = cfg.Provider
+		out["model"] = cfg.Model
+	}
+	// 统计书数量
+	books, _ := s.books.List()
+	out["book_count"] = len(books)
+	writeJSON(w, 200, out)
+}
+
+func (s *Server) handleProfileConfig(w http.ResponseWriter, r *http.Request) {
+	uid := UserIDFromContext(r.Context())
+	cfg, _ := s.auth.db.GetUserConfig(uid)
+	if cfg == nil {
+		writeJSON(w, 200, map[string]any{})
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"provider":    cfg.Provider,
+		"model":       cfg.Model,
+		"base_url":    cfg.BaseURL,
+		"api_key":     cfg.APIKey,
+		"temperature": cfg.Temperature,
+		"max_tokens":  cfg.MaxTokens,
+		"thinking":    cfg.Thinking,
+	})
+}
+
+func (s *Server) handleProfileConfigSave(w http.ResponseWriter, r *http.Request) {
+	uid := UserIDFromContext(r.Context())
+	var req struct {
+		Provider    string  `json:"provider"`
+		Model       string  `json:"model"`
+		BaseURL     string  `json:"base_url"`
+		APIKey      string  `json:"api_key"`
+		Temperature float64 `json:"temperature"`
+		MaxTokens   int     `json:"max_tokens"`
+		Thinking    bool    `json:"thinking"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, "请求格式错误")
+		return
+	}
+	if req.BaseURL != "" {
+		if err := validateBaseURL(req.BaseURL); err != nil {
+			writeErr(w, 400, "%v", err)
+			return
+		}
+	}
+	if err := s.auth.db.SetUserConfig(&UserConfigRow{
+		UserID: uid, Provider: req.Provider, Model: req.Model,
+		BaseURL: req.BaseURL, APIKey: req.APIKey,
+		Temperature: req.Temperature, MaxTokens: req.MaxTokens, Thinking: req.Thinking,
+	}); err != nil {
+		writeErr(w, 500, "保存配置失败: %v", err)
+		return
+	}
+	writeJSON(w, 200, map[string]string{"ok": "true"})
+}
+
+// ---------- 管理员 API ----------
+
+func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
+	users, err := s.auth.ListUsers()
+	if err != nil {
+		writeErr(w, 500, "查询用户: %v", err)
+		return
+	}
+	out := make([]map[string]any, len(users))
+	for i, u := range users {
+		out[i] = map[string]any{
+			"id":           u.ID,
+			"display_name": u.DisplayName,
+			"role":         u.Role,
+			"created_at":   u.CreatedAt.Format(time.RFC3339),
+		}
+	}
+	writeJSON(w, 200, out)
+}
+
+func (s *Server) handleAdminCreateUser(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		DisplayName string `json:"display_name"`
+		Password    string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, "请求格式错误")
+		return
+	}
+	user, err := s.auth.CreateUser(req.DisplayName, req.Password)
+	if err != nil {
+		writeErr(w, 400, "%v", err)
+		return
+	}
+	writeJSON(w, 201, map[string]any{
+		"id":           user.ID,
+		"display_name": user.DisplayName,
+		"role":         user.Role,
+		"created_at":   user.CreatedAt.Format(time.RFC3339),
+	})
+}
+
+func (s *Server) handleAdminUpdateUser(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req struct {
+		DisplayName string `json:"display_name"`
+		Password    string `json:"password,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, "请求格式错误")
+		return
+	}
+	if err := s.auth.UpdateUser(id, req.DisplayName, req.Password); err != nil {
+		writeErr(w, 400, "%v", err)
+		return
+	}
+	writeJSON(w, 200, map[string]string{"ok": "true"})
+}
+
+func (s *Server) handleAdminDeleteUser(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := s.auth.DeleteUser(id); err != nil {
+		writeErr(w, 400, "%v", err)
+		return
+	}
+	writeJSON(w, 200, map[string]string{"ok": "true"})
+}
+
+// ---------- 工具 ----------
+
+func validateBaseURL(urlStr string) error {
+	if !strings.HasPrefix(urlStr, "http://") && !strings.HasPrefix(urlStr, "https://") {
+		return fmt.Errorf("base_url 必须以 http:// 或 https:// 开头")
+	}
+	return nil
 }
 
 // writeJSON 写 JSON 响应。

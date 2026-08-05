@@ -65,11 +65,13 @@ func Command(argv []string, build buildversion.Info) error {
 	}
 	defer bm.Close()
 
-	// 单用户鉴权（密码哈希 + session）。
-	auth, err := NewAuth(opts.DataDir)
+	// 数据库多用户鉴权（SQLite）。
+	db, err := OpenDB(opts.DataDir)
 	if err != nil {
-		return err
+		return fmt.Errorf("打开数据库: %w", err)
 	}
+	defer db.Close()
+	auth := NewAuth(db)
 
 	server := NewServer(bm, auth)
 	srv := &http.Server{
@@ -85,7 +87,7 @@ func Command(argv []string, build buildversion.Info) error {
 			"books_dir", opts.BooksDir,
 			"data_dir", opts.DataDir,
 			"setup_needed", bootstrap.NeedsSetup(),
-			"auth_configured", auth.Configured(),
+			"auth_configured", auth.IsConfigured(),
 			"version", build.Version,
 			"commit", build.Commit,
 		)
