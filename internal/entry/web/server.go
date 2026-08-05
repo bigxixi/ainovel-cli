@@ -156,13 +156,12 @@ func (s *Server) handleSetupAuth(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 409, "已配置，不能重复初始化")
 		return
 	}
-	user, err := s.auth.SetupAdmin(req.DisplayName, req.Password)
+	user, token, err := s.auth.SetupAdmin(req.DisplayName, req.Password)
 	if err != nil {
 		writeErr(w, 400, "%v", err)
 		return
 	}
-	// 自动登录
-	token, _, _ := s.auth.Login(req.Password)
+	// 在 SetupAdmin 内已创建 session，仅需设置 cookie。
 	SetSessionCookie(w, token)
 	writeJSON(w, 200, map[string]any{
 		"configured":   true,

@@ -68,25 +68,32 @@ func (a *Auth) IsAdmin(userID string) bool {
 
 // ---------- 密码与用户 ----------
 
-// SetupAdmin 首次设置管理员账号。已存在管理员时返回错误。
-func (a *Auth) SetupAdmin(displayName, password string) (*UserRow, error) {
+// SetupAdmin 首次设置管理员账号并直接创建登录 session，返回用户与 token。
+func (a *Auth) SetupAdmin(displayName, password string) (*UserRow, string, error) {
 	if len(password) < 6 {
-		return nil, errors.New("访问密码至少 6 位")
+		return nil, "", errors.New("访问密码至少 6 位")
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		return nil, fmt.Errorf("生成密码哈希: %w", err)
+		return nil, "", fmt.Errorf("生成密码哈希: %w", err)
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
 	id := newUserID()
 	if err := a.db.CreateUser(id, displayName, hash, "admin"); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	u, _ := a.db.GetUserByID(id)
+
+	// 在同一个锁内创建 session，避免外部调用 Login 与 SetupAdmin 争锁导致死锁。
+	token := newSessionToken()
+	expires := time.Now().Add(sessionTTL)
+	if err := a.db.CreateSession(token, id, expires); err != nil {
+		return nil, "", fmt.Errorf("创建会话: %w", err)
+	}
 	slog.Info("web: 创建管理员账号", "id", id, "display_name", displayName)
-	return u, nil
+	return u, token, nil
 }
 
 // CreateUser 管理员创建普通用户。
