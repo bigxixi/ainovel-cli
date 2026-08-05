@@ -25,7 +25,8 @@ export const useAuthStore = create<AuthState>((set) => ({
       const status = await api.authStatus()
       set({ status, loading: false })
     } catch {
-      set({ status: { configured: false, logged_in: false }, loading: false })
+      // 网络错误时保留旧 status，不重置 configured/logged_in（防止死循环跳转）
+      set({ loading: false })
     }
   },
 
