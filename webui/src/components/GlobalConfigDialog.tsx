@@ -47,6 +47,7 @@ export function GlobalConfigDialog({ open, onOpenChange }: Props) {
 
   const providerList = presets?.presets || []
   const models = provider ? modelData?.models?.[provider] || [] : []
+  const datalistId = `gcfg-models-${provider || 'none'}`
 
   const save = async () => {
     setSaving(true)
@@ -76,7 +77,13 @@ export function GlobalConfigDialog({ open, onOpenChange }: Props) {
         <div className="space-y-4 pt-2">
           <div className="space-y-2">
             <Label>Provider</Label>
-            <Select value={provider} onValueChange={(v) => { setProvider(v || ''); setModel('') }}>
+            <Select value={provider} onValueChange={(v) => {
+              setProvider(v || '')
+              setModel('')
+              // 自动填入预设 base_url（保持可编辑）
+              const preset = providerList.find(p => p.name === v)
+              if (preset?.base_url) setBaseUrl(preset.base_url)
+            }}>
               <SelectTrigger className="w-full"><SelectValue placeholder="选择 Provider（如 OpenRouter）" /></SelectTrigger>
               <SelectContent>
                 {providerList.map((p) => (
@@ -90,14 +97,14 @@ export function GlobalConfigDialog({ open, onOpenChange }: Props) {
             <Label htmlFor="model">模型</Label>
             <Input
               id="model"
-              list={`models-${provider || 'none'}`}
+              list={datalistId}
               value={model}
               onChange={(e) => setModel(e.target.value)}
               placeholder={provider ? '选择或直接输入模型名' : '请先选择 Provider'}
               className="h-10"
             />
             {models.length > 0 && (
-              <datalist id={`models-${provider}`}>
+              <datalist id={datalistId}>
                 {models.map(m => <option key={m} value={m} />)}
               </datalist>
             )}

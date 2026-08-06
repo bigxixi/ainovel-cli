@@ -1,11 +1,11 @@
 import { create } from 'zustand'
+import { toast as sonnerToast } from 'sonner'
 
 export type View = 'shelf' | 'workspace' | 'admin'
 
 interface AppState {
   view: View
   currentBookId: string | null
-  toaster: { message: string; type: 'info' | 'error' | 'success' } | null
   configDialogOpen: boolean
 
   navigate: (view: View, bookId?: string) => void
@@ -17,7 +17,6 @@ interface AppState {
 export const useAppStore = create<AppState>((set) => ({
   view: 'shelf',
   currentBookId: null,
-  toaster: null,
   configDialogOpen: false,
 
   navigate(view: View, bookId?: string) {
@@ -25,8 +24,7 @@ export const useAppStore = create<AppState>((set) => ({
   },
 
   toast(message: string, type: 'info' | 'error' | 'success' = 'info') {
-    set({ toaster: { message, type } })
-    setTimeout(() => set({ toaster: null }), 4000)
+    sonnerToast[type](message)
   },
 
   openConfigDialog() {

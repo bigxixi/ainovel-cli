@@ -35,6 +35,7 @@ export function ModelDialog({ bookId, open, onOpenChange, currentProvider, curre
 
   const providers = Object.keys(modelData?.models || {})
   const models = provider ? modelData?.models?.[provider] || [] : []
+  const datalistId = `mdl-models-${provider || 'none'}`
 
   const save = async () => {
     if (!provider || !model) return
@@ -70,14 +71,14 @@ export function ModelDialog({ bookId, open, onOpenChange, currentProvider, curre
             <Label htmlFor="model">模型</Label>
             <Input
               id="model"
-              list={`models-${provider || 'none'}`}
+              list={datalistId}
               value={model}
               onChange={(e) => setModel(e.target.value)}
               placeholder={provider ? '选择或直接输入模型名' : '请先选择 Provider'}
               className="h-10"
             />
             {models.length > 0 && (
-              <datalist id={`models-${provider}`}>
+              <datalist id={datalistId}>
                 {models.map(m => <option key={m} value={m} />)}
               </datalist>
             )}
