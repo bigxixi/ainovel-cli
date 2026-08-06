@@ -1,8 +1,8 @@
 # AInovel-WebUI
 
-> 基于 [ainovel-cli](https://github.com/bigxixi/ainovel-webui) 的 Web 工作台——多用户、多书书架、浏览器端 AI 小说创作引擎。
+> 基于 [ainovel-cli](https://github.com/voocel/ainovel-cli) 的 Web 工作台——多用户、多书书架、浏览器端 AI 小说创作引擎。
 
-**原项目**：ainovel-cli 是一个全自动 AI 长篇小说创作引擎，确定性引擎驱动 Architect / Writer / Editor 三个自主代理完成完整小说。详见 [voocel/ainovel-cli](https://github.com/bigxixi/ainovel-webui)。
+**原项目**：ainovel-cli 是一个全自动 AI 长篇小说创作引擎，确定性引擎驱动 Architect / Writer / Editor 三个自主代理完成完整小说。详见 [voocel/ainovel-cli](https://github.com/voocel/ainovel-cli)。
 
 本分支在保留全部引擎能力的基础上，提供了一套现代化的 WebUI，支持 Docker 一键部署到 VPS/家庭服务器，在浏览器或手机上使用。
 
