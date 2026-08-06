@@ -49,38 +49,39 @@
 }
 
 :root {
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.145 0 0);
-    --card: oklch(1 0 0);
-    --card-foreground: oklch(0.145 0 0);
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.145 0 0);
-    --primary: oklch(0.205 0 0);
-    --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.97 0 0);
-    --secondary-foreground: oklch(0.205 0 0);
-    --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
-    --accent: oklch(0.97 0 0);
-    --accent-foreground: oklch(0.205 0 0);
-    --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.922 0 0);
-    --input: oklch(0.922 0 0);
-    --ring: oklch(0.708 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
-    --radius: 0.625rem;
-    --sidebar: oklch(0.985 0 0);
-    --sidebar-foreground: oklch(0.145 0 0);
-    --sidebar-primary: oklch(0.205 0 0);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.97 0 0);
-    --sidebar-accent-foreground: oklch(0.205 0 0);
-    --sidebar-border: oklch(0.922 0 0);
-    --sidebar-ring: oklch(0.708 0 0);
+    /* 章舟浅色专业写作风：暖灰纸白背景、深墨绿黑文字、沉稳绿主色、克制圆角 */
+    --background: #f2f1ed;
+    --foreground: #202621;
+    --card: #fffefa;
+    --card-foreground: #202621;
+    --popover: #fffefa;
+    --popover-foreground: #202621;
+    --primary: #2f6c55;
+    --primary-foreground: #ffffff;
+    --secondary: #e7e4dc;
+    --secondary-foreground: #202621;
+    --muted: #eae8e2;
+    --muted-foreground: #6b6f68;
+    --accent: #e2e8e2;
+    --accent-foreground: #1f4a38;
+    --destructive: #c05252;
+    --border: #dcd9d1;
+    --input: #dcd9d1;
+    --ring: #2f6c55;
+    --chart-1: #2f6c55;
+    --chart-2: #6b8f7d;
+    --chart-3: #a0a89f;
+    --chart-4: #c9a86a;
+    --chart-5: #8a6c4f;
+    --radius: 0.5rem;
+    --sidebar: #eae8e2;
+    --sidebar-foreground: #202621;
+    --sidebar-primary: #2f6c55;
+    --sidebar-primary-foreground: #ffffff;
+    --sidebar-accent: #e2e8e2;
+    --sidebar-accent-foreground: #1f4a38;
+    --sidebar-border: #dcd9d1;
+    --sidebar-ring: #2f6c55;
 }
 
 .dark {

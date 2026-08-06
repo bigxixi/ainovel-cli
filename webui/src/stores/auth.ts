@@ -8,8 +8,8 @@ interface AuthState {
   error: string | null
 
   checkStatus: () => Promise<void>
-  login: (password: string) => Promise<void>
-  setupAuth: (displayName: string, password: string) => Promise<void>
+  login: (username: string, password: string) => Promise<void>
+  setupAuth: (username: string, displayName: string, password: string) => Promise<void>
   logout: () => Promise<void>
   clearError: () => void
 }
@@ -30,10 +30,10 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 
-  async login(password: string) {
+  async login(username: string, password: string) {
     set({ loading: true, error: null })
     try {
-      const status = await api.login({ password })
+      const status = await api.login({ username, password })
       set({ status, loading: false })
     } catch (e) {
       const msg = e instanceof ApiError ? `${e.status === 429 ? '登录过于频繁，请稍候' : e.message}` : '登录失败'
@@ -42,10 +42,10 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 
-  async setupAuth(displayName: string, password: string) {
+  async setupAuth(username: string, displayName: string, password: string) {
     set({ loading: true, error: null })
     try {
-      const status = await api.setupAuth({ display_name: displayName, password })
+      const status = await api.setupAuth({ username, display_name: displayName, password })
       set({ status, loading: false })
     } catch (e) {
       const msg = e instanceof ApiError ? e.message : '设置失败'

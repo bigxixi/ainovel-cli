@@ -39,16 +39,20 @@ export interface StreamEvent {
 export interface AuthStatus {
   configured: boolean
   logged_in: boolean
+  username?: string
   display_name?: string
+  role?: 'admin' | 'user'
 }
 
 // 登录请求
 export interface LoginRequest {
+  username: string
   password: string
 }
 
 // 设置密码请求
 export interface SetupAuthRequest {
+  username: string
   display_name: string
   password: string
 }
@@ -128,6 +132,7 @@ export interface CoCreateRequest {
 // 管理：用户列表
 export interface UserInfo {
   id: string
+  username: string
   display_name: string
   role: 'admin' | 'user'
   created_at: string
@@ -136,6 +141,12 @@ export interface UserInfo {
 
 // 管理：创建/修改用户
 export interface AdminUserRequest {
+  username: string
   display_name: string
   password?: string
+}
+
+// 自助删除账号请求
+export interface DeleteAccountRequest {
+  password: string
 }

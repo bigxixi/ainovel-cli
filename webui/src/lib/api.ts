@@ -59,16 +59,20 @@ export const api = {
     request<AuthStatus>('/login', { method: 'POST', body: JSON.stringify(req) }),
 
   logout: () => requestRaw<{ ok: boolean }>('/logout', { method: 'POST' }),
+
+  deleteAccount: (password: string) =>
+    requestRaw<{ ok: boolean }>('/account', { method: 'DELETE', body: JSON.stringify({ password }) }),
 }
 
 // ---------- 书架 ----------
 export const books = {
-  list: () => request<BookMeta[]>('/books'),
+  list: () => request<{ books: BookMeta[] }>('/books').then(r => r.books),
 
   get: (id: string) => request<Snapshot>(`/books/${id}`),
 
   create: (req: CreateBookRequest) =>
-    request<BookMeta & { dir: string }>('/books', { method: 'POST', body: JSON.stringify(req) }),
+    request<{ book: BookMeta; starting: boolean }>('/books', { method: 'POST', body: JSON.stringify(req) })
+      .then(r => ({ ...r.book, starting: r.starting })),
 
   delete: (id: string, keepCompleted?: boolean) =>
     request<{ ok: boolean; kept?: boolean }>(`/books/${id}?keep_completed=${keepCompleted ? 1 : 0}`, { method: 'DELETE' }),
