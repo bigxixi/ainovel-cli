@@ -26,8 +26,8 @@
 # 1. 安装 Docker
 curl -fsSL https://get.docker.com | sh
 
-# 2. 拉取镜像（本分支由 bigxixi/ainovel-cli 构建发布）
-docker pull ghcr.io/bigxixi/ainovel-webui:latest
+# 2. 拉取镜像（本分支由 bigxixi/ainovel-webui 构建发布；正式版 v1.0.0-0.7.5）
+docker pull ghcr.io/bigxixi/ainovel-webui:v1.0.0-0.7.5
 
 # 3. 准备持久化目录
 mkdir -p ~/ainovel/config ~/ainovel/workspace
@@ -39,7 +39,7 @@ docker run -d --name ainovel --restart unless-stopped \
   -e AINOVEL_BOOKS_DIR=/workspace/books \
   -v ~/ainovel/config:/root/.ainovel \
   -v ~/ainovel/workspace:/workspace \
-  ghcr.io/bigxixi/ainovel-webui:latest
+  ghcr.io/bigxixi/ainovel-webui:v1.0.0-0.7.5
 
 # 5. 浏览器打开 http://<VPS_IP>:5269
 #    ① 创建管理员账号（仅首次）→ ② 登录 → ③ 配置 Provider 和 API Key → ④ 新建书
@@ -48,7 +48,7 @@ docker run -d --name ainovel --restart unless-stopped \
 **升级**：
 
 ```bash
-docker pull ghcr.io/bigxixi/ainovel-webui:latest
+docker pull ghcr.io/bigxixi/ainovel-webui:v1.0.0-0.7.5
 docker rm -f ainovel
 # 再执行上面的 docker run（配置和作品挂载目录不变）
 ```
@@ -59,7 +59,7 @@ docker rm -f ainovel
 # docker-compose.yml
 services:
   ainovel:
-    image: ghcr.io/bigxixi/ainovel-webui:latest
+    image: ghcr.io/bigxixi/ainovel-webui:v1.0.0-0.7.5
     restart: unless-stopped
     ports:
       - "5269:5269"
