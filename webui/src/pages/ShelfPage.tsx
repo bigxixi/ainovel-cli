@@ -12,7 +12,8 @@ import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { books } from '@/lib/api'
 import { useAppStore } from '@/stores/app'
-import { Plus, BookOpen, Trash2, Loader2 } from 'lucide-react'
+import { CoCreateDialog } from '@/components/CoCreateDialog'
+import { Plus, BookOpen, Trash2, Loader2, Sparkles, Zap } from 'lucide-react'
 import type { BookMeta } from '@/types'
 
 export function ShelfPage() {
@@ -22,6 +23,8 @@ export function ShelfPage() {
   const [title, setTitle] = useState('')
   const [prompt, setPrompt] = useState('')
   const [creating, setCreating] = useState(false)
+  const [mode, setMode] = useState<'quick' | 'cocreate'>('quick')
+  const [cocreateBookId, setCocreateBookId] = useState<string | null>(null)
   const navigate = useNavigate()
   const qc = useQueryClient()
   const { toast } = useAppStore()
@@ -46,15 +49,19 @@ export function ShelfPage() {
     if (!prompt.trim()) return
     setCreating(true)
     try {
-      const book = await books.create({ title: title.trim() || undefined, prompt: prompt.trim(), mode: 'quick' })
+      const book = await books.create({ title: title.trim() || undefined, prompt: prompt.trim(), mode })
       qc.invalidateQueries({ queryKey: ['books'] })
       setShowCreate(false)
       setTitle('')
       setPrompt('')
-      toast('小说创建成功', 'success')
-      navigate(`/book/${book.id}`)
-    } catch {
-      toast('创建失败', 'error')
+      if (mode === 'cocreate') {
+        setCocreateBookId(book.id)
+      } else {
+        toast('小说创建成功', 'success')
+        navigate(`/book/${book.id}`)
+      }
+    } catch (e: any) {
+      toast(`创建失败: ${e.message}`, 'error')
     } finally {
       setCreating(false)
     }
@@ -76,6 +83,24 @@ export function ShelfPage() {
               <DialogTitle>新建小说</DialogTitle>
             </DialogHeader>
             <div className="space-y-4 pt-2">
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => setMode('quick')}
+                  className={`rounded-lg border p-3 text-left transition-colors ${mode === 'quick' ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40'}`}
+                >
+                  <Zap className="h-4 w-4 mb-1 text-primary" />
+                  <p className="text-sm font-medium">快速开始</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">一句话直接开始创作</p>
+                </button>
+                <button
+                  onClick={() => setMode('cocreate')}
+                  className={`rounded-lg border p-3 text-left transition-colors ${mode === 'cocreate' ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40'}`}
+                >
+                  <Sparkles className="h-4 w-4 mb-1 text-primary" />
+                  <p className="text-sm font-medium">共创规划</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">与 AI 对话澄清需求后再创作</p>
+                </button>
+              </div>
               <div className="space-y-2">
                 <Label>书名（可选）</Label>
                 <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="留空自动生成" />
@@ -92,7 +117,7 @@ export function ShelfPage() {
               </div>
               <Button onClick={handleCreate} disabled={creating || !prompt.trim()} className="w-full">
                 {creating ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                开始创作
+                {mode === 'quick' ? '开始创作' : '进入共创规划'}
               </Button>
             </div>
           </DialogContent>
@@ -169,6 +194,8 @@ export function ShelfPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <CoCreateDialog bookId={cocreateBookId!} open={!!cocreateBookId} onOpenChange={(o) => { if (!o) setCocreateBookId(null) }} />
     </div>
   )
 }

@@ -127,9 +127,9 @@ export const tools = {
 
 // ---------- 共创 ----------
 export const cocreate = {
-  chat: (bookId: string, message: string): AsyncGenerator<CoCreateMessage> => {
+  chat: (bookId: string, messages: CoCreateMessage[]): AsyncGenerator<CoCreateMessage> => {
     const url = `${BASE}/books/${bookId}/cocreate`
-    const iter = sseStream(url, { method: 'POST', body: JSON.stringify({ message }) })
+    const iter = sseStream(url, { method: 'POST', body: JSON.stringify({ messages }) })
     return (async function* () {
       for await (const ev of iter) {
         if (ev.event === 'delta') {
