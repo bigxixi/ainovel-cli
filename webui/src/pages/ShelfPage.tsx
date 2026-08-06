@@ -27,7 +27,7 @@ export function ShelfPage() {
   const [cocreateBookId, setCocreateBookId] = useState<string | null>(null)
   const navigate = useNavigate()
   const qc = useQueryClient()
-  const { toast } = useAppStore()
+  const { toast, openConfigDialog } = useAppStore()
 
   const { data: list, isLoading } = useQuery({
     queryKey: ['books'],
@@ -61,7 +61,12 @@ export function ShelfPage() {
         navigate(`/book/${book.id}`)
       }
     } catch (e: any) {
-      toast(`创建失败: ${e.message}`, 'error')
+      if (e?.status === 503) {
+        toast('尚未配置模型，请先到「全局设置」配置 Provider 与 API Key', 'error')
+        openConfigDialog()
+      } else {
+        toast(`创建失败: ${e.message}`, 'error')
+      }
     } finally {
       setCreating(false)
     }

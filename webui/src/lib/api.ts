@@ -169,7 +169,7 @@ export const config = {
   globalConfig: () => request<ProfileConfig>('/profile/config'),
 
   updateGlobalConfig: (cfg: ProfileConfig) =>
-    request<ProfileConfig>('/profile/config', { method: 'PUT', body: JSON.stringify(cfg) }),
+    request<ProfileConfig>('/profile/config', { method: 'POST', body: JSON.stringify(cfg) }),
 
   profile: () => request<{ display_name: string; role: string; created_at: string; provider: string; model: string }>('/profile'),
 

@@ -3,6 +3,7 @@ import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
 import { api } from '@/lib/api'
+import { GlobalConfigDialog } from '@/components/GlobalConfigDialog'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Input } from '@/components/ui/input'
@@ -19,7 +20,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Separator } from '@/components/ui/separator'
 import {
-  BookOpen, Shield, LogOut, Menu, X, LayoutDashboard, Trash2, Loader2,
+  BookOpen, Shield, LogOut, Menu, X, LayoutDashboard, Trash2, Loader2, Settings2,
 } from 'lucide-react'
 
 const NAV_ITEMS = [
@@ -29,7 +30,7 @@ const NAV_ITEMS = [
 
 export function AppShell() {
   const { status, logout } = useAuthStore()
-  const { toast } = useAppStore()
+  const { toast, configDialogOpen, openConfigDialog, closeConfigDialog } = useAppStore()
   const navigate = useNavigate()
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -84,6 +85,9 @@ export function AppShell() {
             <Shield className="h-4 w-4 mr-2" />账号管理
           </DropdownMenuItem>
         )}
+        <DropdownMenuItem onClick={openConfigDialog}>
+          <Settings2 className="h-4 w-4 mr-2" />全局设置
+        </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={handleLogout}>
           <LogOut className="h-4 w-4 mr-2" />切换账号 / 退出登录
@@ -166,6 +170,9 @@ export function AppShell() {
       <main className="flex-1 overflow-auto md:pt-0 pt-12">
         <Outlet />
       </main>
+
+      {/* 全局设置 */}
+      <GlobalConfigDialog open={configDialogOpen} onOpenChange={closeConfigDialog} />
 
       {/* 删除账号确认 */}
       <Dialog open={showDelete} onOpenChange={setShowDelete}>
