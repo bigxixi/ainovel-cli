@@ -1089,6 +1089,26 @@ func (s *Server) registerSetupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/setup", s.guard(s.handleSetupSave))
 }
 
+// handleGlobalModels 返回全部可选 Provider 及其候选模型（无需书实例，配置对话框用）。
+func (s *Server) handleGlobalModels(w http.ResponseWriter, r *http.Request) {
+	cfg, err := s.books.LoadConfig()
+	if err != nil {
+		writeErr(w, http.StatusServiceUnavailable, "%v", err)
+		return
+	}
+	models := map[string][]string{}
+	for name := range cfg.Providers {
+		models[name] = cfg.CandidateModels(name)
+	}
+	// 附加预设 Provider（即使尚未写入配置，便于首次选择）。
+	for _, p := range bootstrap.ProviderPresets() {
+		if _, ok := models[p.Name]; !ok {
+			models[p.Name] = cfg.CandidateModels(p.Name)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"models": models})
+}
+
 // setupPreset 是 Provider 预设的 SSE 载荷（小写键）。
 type setupPreset struct {
 	Name           string `json:"name"`

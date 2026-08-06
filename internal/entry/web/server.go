@@ -73,6 +73,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/admin/users/{id}", s.adminGuard(s.handleAdminUpdateUser))
 	mux.HandleFunc("DELETE /api/admin/users/{id}", s.adminGuard(s.handleAdminDeleteUser))
 
+	// 全局模型列表（无需书实例，配置对话框用）。
+	mux.HandleFunc("GET /api/models", s.guard(s.handleGlobalModels))
+
 	// 书籍与会话（书架、快照、SSE 事件流）。
 	s.registerBookRoutes(mux)
 	// 运行控制（继续/干预/暂停/推进/重开）。

@@ -9,7 +9,7 @@ import type {
 
 const BASE = '/api'
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     credentials: 'include',
     ...init,
@@ -164,7 +164,9 @@ export const config = {
 
   diag: () => request<DiagInfo>('/diag'),
 
-  presets: () => request<Record<string, ProviderPreset>>('/setup/presets'),
+  presets: () => request<{ presets: ProviderPreset[] }>('/setup/presets'),
+
+  models: () => request<{ models: Record<string, string[]> }>('/models'),
 
   globalConfig: () => request<ProfileConfig>('/profile/config'),
 

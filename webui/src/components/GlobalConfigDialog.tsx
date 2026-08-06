@@ -26,7 +26,8 @@ export function GlobalConfigDialog({ open, onOpenChange }: Props) {
   const [saving, setSaving] = useState(false)
   const [loaded, setLoaded] = useState(false)
 
-  const { data: presets } = useQuery({ queryKey: ['presets'], queryFn: config.globalSetupPresets, enabled: open })
+  const { data: presets } = useQuery({ queryKey: ['presets'], queryFn: config.presets, enabled: open })
+  const { data: modelData } = useQuery({ queryKey: ['models'], queryFn: config.models, enabled: open })
 
   // 打开时加载当前用户配置
   useEffect(() => {
@@ -44,7 +45,8 @@ export function GlobalConfigDialog({ open, onOpenChange }: Props) {
       .finally(() => setLoaded(true))
   }, [open])
 
-  const models = provider ? presets?.[provider]?.models || [] : []
+  const providerList = presets?.presets || []
+  const models = provider ? modelData?.models?.[provider] || [] : []
 
   const save = async () => {
     setSaving(true)
@@ -77,8 +79,8 @@ export function GlobalConfigDialog({ open, onOpenChange }: Props) {
             <Select value={provider} onValueChange={(v) => { setProvider(v || ''); setModel('') }}>
               <SelectTrigger className="w-full"><SelectValue placeholder="选择 Provider（如 OpenRouter）" /></SelectTrigger>
               <SelectContent>
-                {Object.values(presets || {}).map((p: any) => (
-                  <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                {providerList.map((p) => (
+                  <SelectItem key={p.name} value={p.name}>{p.label || p.name}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -89,8 +91,8 @@ export function GlobalConfigDialog({ open, onOpenChange }: Props) {
             <Select value={model} onValueChange={(v) => setModel(v || '')} disabled={!provider}>
               <SelectTrigger className="w-full"><SelectValue placeholder={provider ? '选择模型' : '请先选择 Provider'} /></SelectTrigger>
               <SelectContent>
-                {models.map((m: any) => (
-                  <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
+                {models.map((m) => (
+                  <SelectItem key={m} value={m}>{m}</SelectItem>
                 ))}
               </SelectContent>
             </Select>

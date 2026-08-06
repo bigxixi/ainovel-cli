@@ -4,7 +4,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { config } from '@/lib/api'
+import { config, request } from '@/lib/api'
 import { useAppStore } from '@/stores/app'
 import { Loader2 } from 'lucide-react'
 
@@ -23,9 +23,9 @@ export function ModelDialog({ bookId, open, onOpenChange, currentProvider, curre
   const [model, setModel] = useState(currentModel || '')
   const [saving, setSaving] = useState(false)
 
-  const { data: presets } = useQuery({
-    queryKey: ['presets'],
-    queryFn: config.presets,
+  const { data: bookModels } = useQuery({
+    queryKey: ['bookModels', bookId],
+    queryFn: () => request<{ providers: string[]; models: Record<string, string[]> }>(`/books/${bookId}/models`),
     enabled: open,
   })
 
@@ -36,7 +36,8 @@ export function ModelDialog({ bookId, open, onOpenChange, currentProvider, curre
     }
   }, [open, currentProvider, currentModel])
 
-  const models = provider ? presets?.[provider]?.models || [] : []
+  const providers = bookModels?.providers || []
+  const models = provider ? bookModels?.models?.[provider] || [] : []
 
   const save = async () => {
     if (!provider || !model) return
@@ -62,8 +63,8 @@ export function ModelDialog({ bookId, open, onOpenChange, currentProvider, curre
             <Select value={provider} onValueChange={(v) => { setProvider(v || ''); setModel('') }}>
               <SelectTrigger className="w-full"><SelectValue placeholder="选择 Provider" /></SelectTrigger>
               <SelectContent>
-                {Object.values(presets || {}).map(p => (
-                  <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                {providers.map(p => (
+                  <SelectItem key={p} value={p}>{p}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -74,7 +75,7 @@ export function ModelDialog({ bookId, open, onOpenChange, currentProvider, curre
               <SelectTrigger className="w-full"><SelectValue placeholder={provider ? '选择模型' : '请先选择 Provider'} /></SelectTrigger>
               <SelectContent>
                 {models.map(m => (
-                  <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
+                  <SelectItem key={m} value={m}>{m}</SelectItem>
                 ))}
               </SelectContent>
             </Select>

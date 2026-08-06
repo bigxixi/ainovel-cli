@@ -68,16 +68,13 @@ export interface ProfileConfig {
   thinking?: boolean
 }
 
-// Provider 预设
+// Provider 预设（后端 /api/setup/presets 返回数组）
 export interface ProviderPreset {
-  id: string
   name: string
-  models: ModelPreset[]
-}
-
-export interface ModelPreset {
-  id: string
-  name: string
+  label: string
+  base_url: string
+  need_type: boolean
+  api_key_optional: boolean
 }
 
 // 诊断信息

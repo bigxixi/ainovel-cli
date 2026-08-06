@@ -53,6 +53,19 @@ docker rm -f ainovel
 # 再执行上面的 docker run（配置和作品挂载目录不变）
 ```
 
+**清空所有数据（重置为全新安装）**：
+
+> 删除挂载的持久化目录即可——配置、账号、书架、作品全部清除，等同于在一台新机器上安装，下次访问会重新进入「创建管理员」引导。
+
+```bash
+docker rm -f ainovel                 # 停止并删除容器
+rm -rf ~/ainovel                     # 删除全部持久化数据（config + workspace）
+docker pull ghcr.io/bigxixi/ainovel-webui:v1.0.0-0.7.5
+# 再执行上面的 docker run 即可全新初始化
+```
+
+若使用 docker-compose：`docker compose down && rm -rf ./config ./workspace` 后重新 `docker compose up -d`。
+
 **使用 Compose**：
 
 ```yaml
