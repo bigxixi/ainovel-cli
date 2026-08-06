@@ -10,8 +10,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/voocel/ainovel-cli/internal/host"
-	"github.com/voocel/ainovel-cli/internal/host/sim"
+	"github.com/bigxixi/ainovel-webui/internal/host"
+	"github.com/bigxixi/ainovel-webui/internal/host/sim"
 )
 
 type simulationState struct {

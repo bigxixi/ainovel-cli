@@ -11,8 +11,8 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/voocel/ainovel-cli/internal/bootstrap"
-	"github.com/voocel/ainovel-cli/internal/host"
+	"github.com/bigxixi/ainovel-webui/internal/bootstrap"
+	"github.com/bigxixi/ainovel-webui/internal/host"
 )
 
 type configStep int

@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/voocel/ainovel-cli/internal/domain"
+	"github.com/bigxixi/ainovel-webui/internal/domain"
 )
 
 const checkpointsFile = "meta/checkpoints.jsonl"

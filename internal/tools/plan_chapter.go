@@ -6,9 +6,9 @@ import (
 	"fmt"
 
 	"github.com/voocel/agentcore/schema"
-	"github.com/voocel/ainovel-cli/internal/domain"
-	"github.com/voocel/ainovel-cli/internal/errs"
-	"github.com/voocel/ainovel-cli/internal/store"
+	"github.com/bigxixi/ainovel-webui/internal/domain"
+	"github.com/bigxixi/ainovel-webui/internal/errs"
+	"github.com/bigxixi/ainovel-webui/internal/store"
 )
 
 // PlanChapterTool 保存章节构思，Agent 自主决定规划粒度。

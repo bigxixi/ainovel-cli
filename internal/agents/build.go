@@ -12,12 +12,12 @@ import (
 	corecontext "github.com/voocel/agentcore/context"
 	"github.com/voocel/agentcore/llm"
 	"github.com/voocel/agentcore/subagent"
-	"github.com/voocel/ainovel-cli/assets"
-	"github.com/voocel/ainovel-cli/internal/agents/ctxpack"
-	"github.com/voocel/ainovel-cli/internal/agents/guard"
-	"github.com/voocel/ainovel-cli/internal/bootstrap"
-	"github.com/voocel/ainovel-cli/internal/store"
-	"github.com/voocel/ainovel-cli/internal/tools"
+	"github.com/bigxixi/ainovel-webui/assets"
+	"github.com/bigxixi/ainovel-webui/internal/agents/ctxpack"
+	"github.com/bigxixi/ainovel-webui/internal/agents/guard"
+	"github.com/bigxixi/ainovel-webui/internal/bootstrap"
+	"github.com/bigxixi/ainovel-webui/internal/store"
+	"github.com/bigxixi/ainovel-webui/internal/tools"
 )
 
 // agentToRole 把 subagent name 归一为 ModelSet 认得的 role 名。

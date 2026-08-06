@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/voocel/agentcore"
-	"github.com/voocel/ainovel-cli/internal/utils"
+	"github.com/bigxixi/ainovel-webui/internal/utils"
 )
 
 // handleSubagentDelta 分流 subagent 的文本与工具调用参数：

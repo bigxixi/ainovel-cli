@@ -7,11 +7,11 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/voocel/ainovel-cli/internal/domain"
-	"github.com/voocel/ainovel-cli/internal/entry/startup"
-	"github.com/voocel/ainovel-cli/internal/host"
-	"github.com/voocel/ainovel-cli/internal/host/imp"
-	"github.com/voocel/ainovel-cli/internal/utils"
+	"github.com/bigxixi/ainovel-webui/internal/domain"
+	"github.com/bigxixi/ainovel-webui/internal/entry/startup"
+	"github.com/bigxixi/ainovel-webui/internal/host"
+	"github.com/bigxixi/ainovel-webui/internal/host/imp"
+	"github.com/bigxixi/ainovel-webui/internal/utils"
 )
 
 const maxPromptEventCols = 160

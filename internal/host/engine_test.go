@@ -22,11 +22,11 @@ import (
 
 	"github.com/voocel/agentcore"
 	"github.com/voocel/agentcore/subagent"
-	"github.com/voocel/ainovel-cli/internal/arbiter"
-	"github.com/voocel/ainovel-cli/internal/domain"
-	"github.com/voocel/ainovel-cli/internal/flow"
-	storepkg "github.com/voocel/ainovel-cli/internal/store"
-	"github.com/voocel/ainovel-cli/internal/tools"
+	"github.com/bigxixi/ainovel-webui/internal/arbiter"
+	"github.com/bigxixi/ainovel-webui/internal/domain"
+	"github.com/bigxixi/ainovel-webui/internal/flow"
+	storepkg "github.com/bigxixi/ainovel-webui/internal/store"
+	"github.com/bigxixi/ainovel-webui/internal/tools"
 )
 
 // scriptedChatModel 按回调产出响应的最小 ChatModel。

@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/voocel/agentcore"
-	"github.com/voocel/ainovel-cli/internal/bootstrap"
-	"github.com/voocel/ainovel-cli/internal/store"
+	"github.com/bigxixi/ainovel-webui/internal/bootstrap"
+	"github.com/bigxixi/ainovel-webui/internal/store"
 )
 
 // 冷启动共创：从零澄清需求，产出整本书的创作指令。

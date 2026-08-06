@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	storepkg "github.com/voocel/ainovel-cli/internal/store"
+	storepkg "github.com/bigxixi/ainovel-webui/internal/store"
 )
 
 func TestInterventionStopsWhenPersistenceFails(t *testing.T) {

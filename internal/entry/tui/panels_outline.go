@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/voocel/ainovel-cli/internal/host"
+	"github.com/bigxixi/ainovel-webui/internal/host"
 )
 
 // outlineGridThreshold 大纲切换多列的章节阈值。

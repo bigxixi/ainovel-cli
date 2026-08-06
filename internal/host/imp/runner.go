@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/voocel/agentcore"
-	"github.com/voocel/ainovel-cli/internal/domain"
-	"github.com/voocel/ainovel-cli/internal/logger"
-	"github.com/voocel/ainovel-cli/internal/store"
+	"github.com/bigxixi/ainovel-webui/internal/domain"
+	"github.com/bigxixi/ainovel-webui/internal/logger"
+	"github.com/bigxixi/ainovel-webui/internal/store"
 )
 
 // prompt/schema 版本纳入各阶段 InputDigest；升级 prompt 契约时递增以自然失效下游工件。

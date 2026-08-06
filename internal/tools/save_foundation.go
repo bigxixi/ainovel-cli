@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	"github.com/voocel/agentcore/schema"
-	"github.com/voocel/ainovel-cli/internal/domain"
-	"github.com/voocel/ainovel-cli/internal/errs"
-	"github.com/voocel/ainovel-cli/internal/store"
+	"github.com/bigxixi/ainovel-webui/internal/domain"
+	"github.com/bigxixi/ainovel-webui/internal/errs"
+	"github.com/bigxixi/ainovel-webui/internal/store"
 )
 
 // SaveFoundationTool 保存基础设定（premise/outline/characters），Architect 专用。

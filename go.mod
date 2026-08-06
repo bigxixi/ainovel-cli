@@ -1,4 +1,4 @@
-module github.com/voocel/ainovel-cli
+module github.com/bigxixi/ainovel-webui
 
 go 1.25.5
 

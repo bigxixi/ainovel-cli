@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	"github.com/voocel/agentcore/schema"
-	"github.com/voocel/ainovel-cli/internal/domain"
-	"github.com/voocel/ainovel-cli/internal/llmcontract"
-	"github.com/voocel/ainovel-cli/internal/store"
+	"github.com/bigxixi/ainovel-webui/internal/domain"
+	"github.com/bigxixi/ainovel-webui/internal/llmcontract"
+	"github.com/bigxixi/ainovel-webui/internal/store"
 )
 
 // SaveReviewTool 保存 Editor 的审阅结果。

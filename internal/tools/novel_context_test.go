@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/voocel/ainovel-cli/internal/domain"
-	"github.com/voocel/ainovel-cli/internal/rules"
-	"github.com/voocel/ainovel-cli/internal/store"
+	"github.com/bigxixi/ainovel-webui/internal/domain"
+	"github.com/bigxixi/ainovel-webui/internal/rules"
+	"github.com/bigxixi/ainovel-webui/internal/store"
 )
 
 func newTestContextTool(st *store.Store, refs References, style string) *ContextTool {

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/voocel/ainovel-cli/internal/domain"
-	"github.com/voocel/ainovel-cli/internal/store"
+	"github.com/bigxixi/ainovel-webui/internal/domain"
+	"github.com/bigxixi/ainovel-webui/internal/store"
 )
 
 // newTestStore 构造一个 t.TempDir() 之上的最小 store，已写入 1..n 章终稿与 progress。

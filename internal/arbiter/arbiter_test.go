@@ -12,9 +12,9 @@ import (
 
 	"github.com/voocel/agentcore"
 	"github.com/voocel/agentcore/llm"
-	"github.com/voocel/ainovel-cli/internal/domain"
-	"github.com/voocel/ainovel-cli/internal/llmcontract"
-	storepkg "github.com/voocel/ainovel-cli/internal/store"
+	"github.com/bigxixi/ainovel-webui/internal/domain"
+	"github.com/bigxixi/ainovel-webui/internal/llmcontract"
+	storepkg "github.com/bigxixi/ainovel-webui/internal/store"
 )
 
 // scriptedModel 按调用序号返回预设文本。

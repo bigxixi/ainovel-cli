@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/voocel/ainovel-cli/internal/domain"
-	storepkg "github.com/voocel/ainovel-cli/internal/store"
+	"github.com/bigxixi/ainovel-webui/internal/domain"
+	storepkg "github.com/bigxixi/ainovel-webui/internal/store"
 )
 
 // resumeLabel 基于事实生成 Resume 的 UI 标签。

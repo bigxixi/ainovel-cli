@@ -14,9 +14,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/voocel/ainovel-cli/internal/bootstrap"
-	"github.com/voocel/ainovel-cli/internal/rules"
-	buildversion "github.com/voocel/ainovel-cli/internal/version"
+	"github.com/bigxixi/ainovel-webui/internal/bootstrap"
+	"github.com/bigxixi/ainovel-webui/internal/rules"
+	buildversion "github.com/bigxixi/ainovel-webui/internal/version"
 )
 
 // Options 是 `web` 子命令的启动选项。

@@ -16,14 +16,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/voocel/ainovel-cli/internal/bootstrap"
-	"github.com/voocel/ainovel-cli/internal/diag"
-	"github.com/voocel/ainovel-cli/internal/domain"
-	"github.com/voocel/ainovel-cli/internal/host"
-	"github.com/voocel/ainovel-cli/internal/host/exp"
-	"github.com/voocel/ainovel-cli/internal/host/imp"
-	"github.com/voocel/ainovel-cli/internal/host/sim"
-	"github.com/voocel/ainovel-cli/internal/store"
+	"github.com/bigxixi/ainovel-webui/internal/bootstrap"
+	"github.com/bigxixi/ainovel-webui/internal/diag"
+	"github.com/bigxixi/ainovel-webui/internal/domain"
+	"github.com/bigxixi/ainovel-webui/internal/host"
+	"github.com/bigxixi/ainovel-webui/internal/host/exp"
+	"github.com/bigxixi/ainovel-webui/internal/host/imp"
+	"github.com/bigxixi/ainovel-webui/internal/host/sim"
+	"github.com/bigxixi/ainovel-webui/internal/store"
 )
 
 // registerBookRoutes 注册书籍与会话相关路由（书架清单、新建、快照、SSE 事件流）。

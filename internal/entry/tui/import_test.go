@@ -10,7 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/voocel/ainovel-cli/internal/host/imp"
+	"github.com/bigxixi/ainovel-webui/internal/host/imp"
 )
 
 // TestImportHistoryCoalescesRetryLines 守护重试行原地更新：同 Key 连续事件只占一行

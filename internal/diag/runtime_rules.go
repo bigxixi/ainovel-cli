@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/voocel/ainovel-cli/internal/store"
+	"github.com/bigxixi/ainovel-webui/internal/store"
 )
 
 // 运行时检测阈值。

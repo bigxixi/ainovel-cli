@@ -7,7 +7,7 @@ import (
 
 	"github.com/voocel/agentcore"
 	"github.com/voocel/agentcore/llm"
-	"github.com/voocel/ainovel-cli/internal/llmcontract"
+	"github.com/bigxixi/ainovel-webui/internal/llmcontract"
 )
 
 func TestSimulationContractsAreStrictReady(t *testing.T) {

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/voocel/ainovel-cli/internal/domain"
-	"github.com/voocel/ainovel-cli/internal/store"
+	"github.com/bigxixi/ainovel-webui/internal/domain"
+	"github.com/bigxixi/ainovel-webui/internal/store"
 )
 
 func TestSaveFoundationStopsOnCorruptProgress(t *testing.T) {

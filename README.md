@@ -1,8 +1,8 @@
 # AInovel-WebUI
 
-> 基于 [ainovel-cli](https://github.com/voocel/ainovel-cli) 的 Web 工作台——多用户、多书书架、浏览器端 AI 小说创作引擎。
+> 基于 [ainovel-cli](https://github.com/bigxixi/ainovel-webui) 的 Web 工作台——多用户、多书书架、浏览器端 AI 小说创作引擎。
 
-**原项目**：ainovel-cli 是一个全自动 AI 长篇小说创作引擎，确定性引擎驱动 Architect / Writer / Editor 三个自主代理完成完整小说。详见 [voocel/ainovel-cli](https://github.com/voocel/ainovel-cli)。
+**原项目**：ainovel-cli 是一个全自动 AI 长篇小说创作引擎，确定性引擎驱动 Architect / Writer / Editor 三个自主代理完成完整小说。详见 [voocel/ainovel-cli](https://github.com/bigxixi/ainovel-webui)。
 
 本分支在保留全部引擎能力的基础上，提供了一套现代化的 WebUI，支持 Docker 一键部署到 VPS/家庭服务器，在浏览器或手机上使用。
 
@@ -27,7 +27,7 @@
 curl -fsSL https://get.docker.com | sh
 
 # 2. 拉取镜像（本分支由 bigxixi/ainovel-cli 构建发布）
-docker pull ghcr.io/bigxixi/ainovel-cli:latest
+docker pull ghcr.io/bigxixi/ainovel-webui:latest
 
 # 3. 准备持久化目录
 mkdir -p ~/ainovel/config ~/ainovel/workspace
@@ -39,7 +39,7 @@ docker run -d --name ainovel --restart unless-stopped \
   -e AINOVEL_BOOKS_DIR=/workspace/books \
   -v ~/ainovel/config:/root/.ainovel \
   -v ~/ainovel/workspace:/workspace \
-  ghcr.io/bigxixi/ainovel-cli:latest
+  ghcr.io/bigxixi/ainovel-webui:latest
 
 # 5. 浏览器打开 http://<VPS_IP>:5269
 #    ① 创建管理员账号（仅首次）→ ② 登录 → ③ 配置 Provider 和 API Key → ④ 新建书
@@ -48,7 +48,7 @@ docker run -d --name ainovel --restart unless-stopped \
 **升级**：
 
 ```bash
-docker pull ghcr.io/bigxixi/ainovel-cli:latest
+docker pull ghcr.io/bigxixi/ainovel-webui:latest
 docker rm -f ainovel
 # 再执行上面的 docker run（配置和作品挂载目录不变）
 ```
@@ -59,7 +59,7 @@ docker rm -f ainovel
 # docker-compose.yml
 services:
   ainovel:
-    image: ghcr.io/bigxixi/ainovel-cli:latest
+    image: ghcr.io/bigxixi/ainovel-webui:latest
     restart: unless-stopped
     ports:
       - "5269:5269"
@@ -115,4 +115,4 @@ npm run dev
 
 ## License
 
-与原项目一致：[MIT](https://github.com/voocel/ainovel-cli/blob/main/LICENSE)。
+与原项目一致：[MIT](https://github.com/bigxixi/ainovel-webui/blob/main/LICENSE)。

@@ -7,14 +7,14 @@ import (
 	"os"
 	"strings"
 
-	"github.com/voocel/ainovel-cli/assets"
-	"github.com/voocel/ainovel-cli/internal/bootstrap"
-	"github.com/voocel/ainovel-cli/internal/entry/headless"
-	"github.com/voocel/ainovel-cli/internal/entry/tui"
-	"github.com/voocel/ainovel-cli/internal/entry/web"
-	"github.com/voocel/ainovel-cli/internal/eval"
-	"github.com/voocel/ainovel-cli/internal/rules"
-	buildversion "github.com/voocel/ainovel-cli/internal/version"
+	"github.com/bigxixi/ainovel-webui/assets"
+	"github.com/bigxixi/ainovel-webui/internal/bootstrap"
+	"github.com/bigxixi/ainovel-webui/internal/entry/headless"
+	"github.com/bigxixi/ainovel-webui/internal/entry/tui"
+	"github.com/bigxixi/ainovel-webui/internal/entry/web"
+	"github.com/bigxixi/ainovel-webui/internal/eval"
+	"github.com/bigxixi/ainovel-webui/internal/rules"
+	buildversion "github.com/bigxixi/ainovel-webui/internal/version"
 )
 
 var (

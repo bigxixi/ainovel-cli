@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/voocel/agentcore"
-	"github.com/voocel/ainovel-cli/internal/host"
+	"github.com/bigxixi/ainovel-webui/internal/host"
 )
 
 type fakeModelRuntime struct {

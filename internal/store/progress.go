@@ -6,8 +6,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/voocel/ainovel-cli/internal/domain"
-	"github.com/voocel/ainovel-cli/internal/errs"
+	"github.com/bigxixi/ainovel-webui/internal/domain"
+	"github.com/bigxixi/ainovel-webui/internal/errs"
 )
 
 // ProgressStore 管理创作进度状态。

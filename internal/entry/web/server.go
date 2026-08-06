@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/voocel/ainovel-cli/internal/bootstrap"
+	"github.com/bigxixi/ainovel-webui/internal/bootstrap"
 )
 
 //go:embed static

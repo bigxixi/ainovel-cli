@@ -1,6 +1,6 @@
 services:
   ainovel:
-    image: ghcr.io/bigxixi/ainovel-cli:latest
+    image: ghcr.io/bigxixi/ainovel-webui:latest
     build:
       context: .
     ports:

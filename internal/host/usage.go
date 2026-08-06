@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/voocel/agentcore"
-	"github.com/voocel/ainovel-cli/internal/bootstrap"
-	"github.com/voocel/ainovel-cli/internal/domain"
-	"github.com/voocel/ainovel-cli/internal/models"
-	storepkg "github.com/voocel/ainovel-cli/internal/store"
+	"github.com/bigxixi/ainovel-webui/internal/bootstrap"
+	"github.com/bigxixi/ainovel-webui/internal/domain"
+	"github.com/bigxixi/ainovel-webui/internal/models"
+	storepkg "github.com/bigxixi/ainovel-webui/internal/store"
 )
 
 // recentSampleCap 是滑动窗大小：只保留每个 role 最近 N 次调用的 (cacheRead, input)

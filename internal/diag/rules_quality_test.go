@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/voocel/ainovel-cli/internal/domain"
+	"github.com/bigxixi/ainovel-webui/internal/domain"
 )
 
 func TestHookWeakChain(t *testing.T) {

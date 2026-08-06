@@ -3,7 +3,7 @@ package tools
 import (
 	"strings"
 
-	"github.com/voocel/ainovel-cli/internal/domain"
+	"github.com/bigxixi/ainovel-webui/internal/domain"
 )
 
 var premiseHeadingAliases = map[string]string{

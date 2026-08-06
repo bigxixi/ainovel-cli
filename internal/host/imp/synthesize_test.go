@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/voocel/agentcore"
-	"github.com/voocel/ainovel-cli/internal/domain"
+	"github.com/bigxixi/ainovel-webui/internal/domain"
 )
 
 func factsN(n int) []ImportedChapterFacts {

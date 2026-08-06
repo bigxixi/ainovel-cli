@@ -2,7 +2,7 @@ package sim
 
 import (
 	"github.com/voocel/agentcore/schema"
-	"github.com/voocel/ainovel-cli/internal/llmcontract"
+	"github.com/bigxixi/ainovel-webui/internal/llmcontract"
 )
 
 func textList(description string) map[string]any {

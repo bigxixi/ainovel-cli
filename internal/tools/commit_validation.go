@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/voocel/ainovel-cli/internal/domain"
-	"github.com/voocel/ainovel-cli/internal/errs"
+	"github.com/bigxixi/ainovel-webui/internal/domain"
+	"github.com/bigxixi/ainovel-webui/internal/errs"
 )
 
 // validateCommitArgs 在创建 PendingCommit 前校验模型提交的完整语义载荷。

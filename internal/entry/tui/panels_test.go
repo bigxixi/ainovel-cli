@@ -6,7 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/voocel/ainovel-cli/internal/host"
+	"github.com/bigxixi/ainovel-webui/internal/host"
 )
 
 func TestRenderTopBarShowsVersion(t *testing.T) {

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/voocel/ainovel-cli/internal/domain"
-	storepkg "github.com/voocel/ainovel-cli/internal/store"
+	"github.com/bigxixi/ainovel-webui/internal/domain"
+	storepkg "github.com/bigxixi/ainovel-webui/internal/store"
 )
 
 func TestLoadStateReturnsProgressReadError(t *testing.T) {

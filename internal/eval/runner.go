@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/voocel/ainovel-cli/assets"
-	"github.com/voocel/ainovel-cli/internal/bootstrap"
-	"github.com/voocel/ainovel-cli/internal/domain"
-	"github.com/voocel/ainovel-cli/internal/entry/startup"
-	"github.com/voocel/ainovel-cli/internal/host"
-	"github.com/voocel/ainovel-cli/internal/logger"
+	"github.com/bigxixi/ainovel-webui/assets"
+	"github.com/bigxixi/ainovel-webui/internal/bootstrap"
+	"github.com/bigxixi/ainovel-webui/internal/domain"
+	"github.com/bigxixi/ainovel-webui/internal/entry/startup"
+	"github.com/bigxixi/ainovel-webui/internal/host"
+	"github.com/bigxixi/ainovel-webui/internal/logger"
 )
 
 // RunOptions 控制单次 case 运行。

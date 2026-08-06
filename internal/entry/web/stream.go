@@ -3,7 +3,7 @@ package web
 import (
 	"sync"
 
-	"github.com/voocel/ainovel-cli/internal/host"
+	"github.com/bigxixi/ainovel-webui/internal/host"
 )
 
 // hubMessage 是 hub 广播给订阅者的一条消息。

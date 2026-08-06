@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/voocel/ainovel-cli/internal/domain"
-	"github.com/voocel/ainovel-cli/internal/llmcontract"
-	"github.com/voocel/ainovel-cli/internal/store"
+	"github.com/bigxixi/ainovel-webui/internal/domain"
+	"github.com/bigxixi/ainovel-webui/internal/llmcontract"
+	"github.com/bigxixi/ainovel-webui/internal/store"
 )
 
 func newTestCommitChapterTool(st *store.Store) *CommitChapterTool {
