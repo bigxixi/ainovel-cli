@@ -1092,7 +1092,8 @@ func (s *Server) registerSetupRoutes(mux *http.ServeMux) {
 // handleGlobalModels 返回全部可选 Provider 及其候选模型（无需书实例，配置对话框用）。
 // 候选模型 = 当前配置中的模型 + Provider 预设的常用模型。
 func (s *Server) handleGlobalModels(w http.ResponseWriter, r *http.Request) {
-	cfg, err := s.books.LoadConfig()
+	uid := UserIDFromContext(r.Context())
+	cfg, err := s.books.LoadConfigFor(uid)
 	if err != nil {
 		writeErr(w, http.StatusServiceUnavailable, "%v", err)
 		return

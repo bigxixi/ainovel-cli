@@ -46,16 +46,42 @@ func Command(argv []string, build buildversion.Info) error {
 	// 全局写作偏好目录（与 TUI 启动一致）。
 	rules.EnsureHomeRulesDir()
 
-	// 配置每次创建书时重新加载：/api/setup 或用户改配置后无需重启服务器。
-	cfgLoader := func() (bootstrap.Config, error) {
+	// 数据库多用户鉴权（SQLite）。
+	db, err := OpenDB(opts.DataDir)
+	if err != nil {
+		return fmt.Errorf("打开数据库: %w", err)
+	}
+	defer db.Close()
+	auth := NewAuth(db)
+
+	// 配置每次创建书时按「当前用户」重新加载：
+	// 系统 config.json 为基底，叠加该用户在 user_config 表的 Provider/API Key/模型，
+	// 实现多用户配置完全隔离且改配置后无需重启服务器。
+	cfgLoader := func(userID string) (bootstrap.Config, error) {
+		// 先读该用户自己的配置（DB user_config）。
+		uc, err := db.GetUserConfig(userID)
+		if err != nil {
+			return bootstrap.Config{}, fmt.Errorf("读取用户配置: %w", err)
+		}
+		userConfigured := uc != nil && (uc.Provider != "" || uc.APIKey != "")
 		if bootstrap.NeedsSetup() {
-			return bootstrap.Config{}, errors.New("尚未完成首次引导：请先访问 /setup 配置 Provider 与模型")
+			if !userConfigured {
+				return bootstrap.Config{}, errors.New("尚未配置模型：请先到「全局设置」配置 Provider 与 API Key")
+			}
+			// 用户已在 Web 端保存过配置：以用户配置构建（无需系统 config.json）。
+			cfg := bootstrap.Config{}
+			cfg.FillDefaults()
+			applyUserConfig(&cfg, uc)
+			return cfg, nil
 		}
 		cfg, err := bootstrap.LoadConfig()
 		if err != nil {
 			return bootstrap.Config{}, err
 		}
 		cfg.FillDefaults()
+		if uc != nil {
+			applyUserConfig(&cfg, uc)
+		}
 		return cfg, nil
 	}
 
@@ -64,14 +90,6 @@ func Command(argv []string, build buildversion.Info) error {
 		return err
 	}
 	defer bm.Close()
-
-	// 数据库多用户鉴权（SQLite）。
-	db, err := OpenDB(opts.DataDir)
-	if err != nil {
-		return fmt.Errorf("打开数据库: %w", err)
-	}
-	defer db.Close()
-	auth := NewAuth(db)
 
 	server := NewServer(bm, auth)
 	srv := &http.Server{

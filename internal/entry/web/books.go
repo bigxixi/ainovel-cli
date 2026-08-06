@@ -75,7 +75,7 @@ func (b *Book) CancelAux() {
 // StreamHub 每书一个消费 goroutine，把 Events()/Stream()/Done() 广播给订阅者。
 type BookManager struct {
 	mu        sync.Mutex
-	cfgLoader func() (bootstrap.Config, error) // 每次创建书时加载最新配置（/api/setup 后可生效）
+	cfgLoader func(userID string) (bootstrap.Config, error) // 每次创建书时加载最新配置（/api/setup 后可生效）
 	booksDir  string
 	books     map[string]*Book
 	closed    bool
@@ -83,7 +83,7 @@ type BookManager struct {
 
 // NewBookManager 构造多书管理器。booksDir 是书架根目录，不存在则创建。
 // cfgLoader 在每次创建书会话时调用，保证 /api/setup 或改配置后无需重启。
-func NewBookManager(cfgLoader func() (bootstrap.Config, error), booksDir string) (*BookManager, error) {
+func NewBookManager(cfgLoader func(userID string) (bootstrap.Config, error), booksDir string) (*BookManager, error) {
 	if cfgLoader == nil {
 		return nil, fmt.Errorf("配置加载器为空")
 	}
@@ -115,7 +115,12 @@ func bookKey(userID, bookID string) string { return userID + "/" + bookID }
 
 // LoadConfig 返回当前有效配置（供全局 profile 配置读写使用）。
 func (bm *BookManager) LoadConfig() (bootstrap.Config, error) {
-	return bm.cfgLoader()
+	return bm.cfgLoader("")
+}
+
+// LoadConfigFor 返回指定用户的叠加配置（系统配置 + 用户 user_config）。
+func (bm *BookManager) LoadConfigFor(userID string) (bootstrap.Config, error) {
+	return bm.cfgLoader(userID)
 }
 
 // CreateRequest 是新建书的请求（快速模式）。
@@ -302,7 +307,7 @@ func (bm *BookManager) createSessionLocked(userID, title string) (*Book, error) 
 	if len(bm.books) >= maxBooks {
 		return nil, fmt.Errorf("书架书籍数量已达上限（%d 本），请先删除部分书籍", maxBooks)
 	}
-	cfg, err := bm.cfgLoader()
+	cfg, err := bm.cfgLoader(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -411,7 +416,7 @@ func (bm *BookManager) Get(userID, id string) (*Book, error) {
 		return nil, fmt.Errorf("书目录不存在: %s", dir)
 	}
 
-	cfg, err := bm.cfgLoader()
+	cfg, err := bm.cfgLoader(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -555,4 +560,33 @@ func newReqID() string {
 		return time.Now().Format("150405.000")
 	}
 	return hex.EncodeToString(buf)
+}
+
+// applyUserConfig 将用户自己的全局配置叠加到系统配置之上（多用户配置隔离）。
+func applyUserConfig(cfg *bootstrap.Config, uc *UserConfigRow) {
+	if uc == nil {
+		return
+	}
+	if uc.Provider != "" {
+		cfg.Provider = uc.Provider
+	}
+	if uc.Model != "" {
+		cfg.ModelName = uc.Model
+	}
+	if uc.Provider != "" || uc.APIKey != "" || uc.BaseURL != "" {
+		if cfg.Providers == nil {
+			cfg.Providers = map[string]bootstrap.ProviderConfig{}
+		}
+		pc := cfg.Providers[uc.Provider]
+		if uc.APIKey != "" {
+			pc.APIKey = uc.APIKey
+		}
+		if uc.BaseURL != "" {
+			pc.BaseURL = uc.BaseURL
+		}
+		cfg.Providers[uc.Provider] = pc
+	}
+	if uc.Thinking {
+		cfg.ReasoningEffort = "high"
+	}
 }
