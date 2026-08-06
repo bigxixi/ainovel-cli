@@ -69,9 +69,12 @@ func (a *Auth) IsAdmin(userID string) bool {
 // ---------- 密码与用户 ----------
 
 // SetupAdmin 首次设置管理员账号并直接创建登录 session，返回用户与 token。
-func (a *Auth) SetupAdmin(displayName, password string) (*UserRow, string, error) {
+func (a *Auth) SetupAdmin(username, displayName, password string) (*UserRow, string, error) {
 	if len(password) < 6 {
 		return nil, "", errors.New("访问密码至少 6 位")
+	}
+	if err := validateUsername(username); err != nil {
+		return nil, "", err
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -81,7 +84,7 @@ func (a *Auth) SetupAdmin(displayName, password string) (*UserRow, string, error
 	defer a.mu.Unlock()
 
 	id := newUserID()
-	if err := a.db.CreateUser(id, displayName, hash, "admin"); err != nil {
+	if err := a.db.CreateUser(id, username, displayName, hash, "admin"); err != nil {
 		return nil, "", err
 	}
 	u, _ := a.db.GetUserByID(id)
@@ -92,14 +95,17 @@ func (a *Auth) SetupAdmin(displayName, password string) (*UserRow, string, error
 	if err := a.db.CreateSession(token, id, expires); err != nil {
 		return nil, "", fmt.Errorf("创建会话: %w", err)
 	}
-	slog.Info("web: 创建管理员账号", "id", id, "display_name", displayName)
+	slog.Info("web: 创建管理员账号", "id", id, "username", username)
 	return u, token, nil
 }
 
 // CreateUser 管理员创建普通用户。
-func (a *Auth) CreateUser(displayName, password string) (*UserRow, error) {
+func (a *Auth) CreateUser(username, displayName, password string) (*UserRow, error) {
 	if len(password) < 6 {
 		return nil, errors.New("访问密码至少 6 位")
+	}
+	if err := validateUsername(username); err != nil {
+		return nil, err
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -108,11 +114,11 @@ func (a *Auth) CreateUser(displayName, password string) (*UserRow, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	id := newUserID()
-	if err := a.db.CreateUser(id, displayName, hash, "user"); err != nil {
+	if err := a.db.CreateUser(id, username, displayName, hash, "user"); err != nil {
 		return nil, err
 	}
 	u, _ := a.db.GetUserByID(id)
-	slog.Info("web: 创建用户", "id", id, "display_name", displayName)
+	slog.Info("web: 创建用户", "id", id, "username", username)
 	return u, nil
 }
 
@@ -122,12 +128,17 @@ func (a *Auth) ListUsers() ([]UserRow, error) {
 }
 
 // UpdateUser 修改用户信息（管理员用）。
-func (a *Auth) UpdateUser(id, displayName, password string) error {
+func (a *Auth) UpdateUser(id, username, displayName, password string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	u, err := a.db.GetUserByID(id)
 	if err != nil || u == nil {
 		return fmt.Errorf("用户不存在")
+	}
+	if username != "" {
+		if err := validateUsername(username); err != nil {
+			return err
+		}
 	}
 	var hash []byte
 	if password != "" {
@@ -136,7 +147,7 @@ func (a *Auth) UpdateUser(id, displayName, password string) error {
 			return fmt.Errorf("生成密码哈希: %w", err)
 		}
 	}
-	return a.db.UpdateUser(id, displayName, hash)
+	return a.db.UpdateUser(id, username, displayName, hash)
 }
 
 // DeleteUser 删除用户（管理员用，不能删管理员自己）。
@@ -144,36 +155,55 @@ func (a *Auth) DeleteUser(id string) error {
 	return a.db.DeleteUser(id)
 }
 
+// VerifyPassword 校验用户密码（自助删除账号用）。
+func (a *Auth) VerifyPassword(id, password string) error {
+	u, err := a.db.GetUserByID(id)
+	if err != nil || u == nil {
+		return errors.New("用户不存在")
+	}
+	if bcrypt.CompareHashAndPassword(u.PasswordHash, []byte(password)) != nil {
+		time.Sleep(400 * time.Millisecond)
+		return errors.New("密码错误")
+	}
+	return nil
+}
+
+// validateUsername 校验用户名格式（字母/数字/下划线/连字符，2-32 位）。
+func validateUsername(name string) error {
+	if len(name) < 2 || len(name) > 32 {
+		return errors.New("用户名长度需在 2-32 位")
+	}
+	for _, r := range name {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-') {
+			return errors.New("用户名只能包含字母、数字、下划线和连字符")
+		}
+	}
+	return nil
+}
+
 // ---------- 登录 / 登出 ----------
 
-// Login 校验密码并创建 session，返回 session token。
-func (a *Auth) Login(password string) (token string, user *UserRow, err error) {
-	// 查找所有用户，逐一比对密码（不支持用户名登录，仅密码）
-	users, err := a.db.ListUsers()
+// Login 校验用户名+密码并创建 session，返回 session token。
+func (a *Auth) Login(username, password string) (token string, user *UserRow, err error) {
+	u, err := a.db.GetUserByUsername(username)
 	if err != nil {
 		return "", nil, fmt.Errorf("查询用户: %w", err)
 	}
-	var found *UserRow
-	for i := range users {
-		if bcrypt.CompareHashAndPassword(users[i].PasswordHash, []byte(password)) == nil {
-			found = &users[i]
-			break
-		}
+	// 统一错误 + 固定延迟，防用户名枚举与时序侧信道。
+	if u == nil || bcrypt.CompareHashAndPassword(u.PasswordHash, []byte(password)) != nil {
+		time.Sleep(600 * time.Millisecond)
+		return "", nil, errors.New("用户名或密码错误")
 	}
-	// 固定比对延迟（无论是否找到用户）
 	time.Sleep(600 * time.Millisecond)
-	if found == nil {
-		return "", nil, errors.New("密码错误")
-	}
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	token = newSessionToken()
 	expires := time.Now().Add(sessionTTL)
-	if err := a.db.CreateSession(token, found.ID, expires); err != nil {
+	if err := a.db.CreateSession(token, u.ID, expires); err != nil {
 		return "", nil, fmt.Errorf("创建会话: %w", err)
 	}
-	return token, found, nil
+	return token, u, nil
 }
 
 // Validate 从 cookie 校验 session，返回用户 ID。

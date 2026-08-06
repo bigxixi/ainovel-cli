@@ -45,6 +45,7 @@ func (db *DB) migrate() error {
 	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS users (
 			id         TEXT PRIMARY KEY,
+			username   TEXT,
 			display_name TEXT NOT NULL DEFAULT '',
 			password_hash BLOB NOT NULL,
 			role       TEXT NOT NULL DEFAULT 'user' CHECK(role IN ('admin','user')),
@@ -59,7 +60,6 @@ func (db *DB) migrate() error {
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 		);
 		CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
-		-- 每个用户的全局配置（合并到 users 表延展字段，或用独立表）
 		CREATE TABLE IF NOT EXISTS user_config (
 			user_id    TEXT PRIMARY KEY,
 			provider   TEXT NOT NULL DEFAULT '',
@@ -72,13 +72,52 @@ func (db *DB) migrate() error {
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 		);
 	`)
-	return err
+	if err != nil {
+		return err
+	}
+	// v1 → v2 迁移：已有库补 username 列（用 display_name 兑底，再唯一索引）。
+	cols, err := db.Query(`PRAGMA table_info(users)`)
+	if err != nil {
+		return err
+	}
+	hasUsername := false
+	for cols.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt any
+		if err := cols.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			cols.Close()
+			return err
+		}
+		if name == "username" {
+			hasUsername = true
+		}
+	}
+	cols.Close()
+	if !hasUsername {
+		if _, err := db.Exec(`ALTER TABLE users ADD COLUMN username TEXT`); err != nil {
+			return err
+		}
+	}
+	// 兕底填充：无 username 的旧用户用 display_name，仍为空则用 id 前缀。
+	if _, err := db.Exec(`UPDATE users SET username = display_name WHERE username IS NULL OR username = ''`); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`UPDATE users SET username = 'u' || substr(id, 1, 8) WHERE username IS NULL OR username = ''`); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username) WHERE username IS NOT NULL`); err != nil {
+		return err
+	}
+	return nil
 }
 
 // ---------- User CRUD ----------
 
 type UserRow struct {
 	ID           string
+	Username     string
 	DisplayName  string
 	PasswordHash []byte
 	Role         string
@@ -86,7 +125,7 @@ type UserRow struct {
 	UpdatedAt    time.Time
 }
 
-func (db *DB) CreateUser(id, displayName string, hash []byte, role string) error {
+func (db *DB) CreateUser(id, username, displayName string, hash []byte, role string) error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
 	// 管理员唯一约束
@@ -101,17 +140,26 @@ func (db *DB) CreateUser(id, displayName string, hash []byte, role string) error
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := db.Exec(
-		"INSERT INTO users (id, display_name, password_hash, role, created_at, updated_at) VALUES (?,?,?,?,?,?)",
-		id, displayName, hash, role, now, now,
+		"INSERT INTO users (id, username, display_name, password_hash, role, created_at, updated_at) VALUES (?,?,?,?,?,?,?)",
+		id, username, displayName, hash, role, now, now,
 	)
 	return err
 }
 
+func (db *DB) GetUserByUsername(username string) (*UserRow, error) {
+	row := db.QueryRow("SELECT id, username, display_name, password_hash, role, created_at, updated_at FROM users WHERE username=?", username)
+	return scanUser(row)
+}
+
 func (db *DB) GetUserByID(id string) (*UserRow, error) {
-	row := db.QueryRow("SELECT id, display_name, password_hash, role, created_at, updated_at FROM users WHERE id=?", id)
+	row := db.QueryRow("SELECT id, username, display_name, password_hash, role, created_at, updated_at FROM users WHERE id=?", id)
+	return scanUser(row)
+}
+
+func scanUser(row *sql.Row) (*UserRow, error) {
 	u := &UserRow{}
 	var ca, ua string
-	if err := row.Scan(&u.ID, &u.DisplayName, &u.PasswordHash, &u.Role, &ca, &ua); err != nil {
+	if err := row.Scan(&u.ID, &u.Username, &u.DisplayName, &u.PasswordHash, &u.Role, &ca, &ua); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -123,7 +171,7 @@ func (db *DB) GetUserByID(id string) (*UserRow, error) {
 }
 
 func (db *DB) ListUsers() ([]UserRow, error) {
-	rows, err := db.Query("SELECT id, display_name, password_hash, role, created_at, updated_at FROM users ORDER BY created_at")
+	rows, err := db.Query("SELECT id, username, display_name, password_hash, role, created_at, updated_at FROM users ORDER BY created_at")
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +180,7 @@ func (db *DB) ListUsers() ([]UserRow, error) {
 	for rows.Next() {
 		u := UserRow{}
 		var ca, ua string
-		if err := rows.Scan(&u.ID, &u.DisplayName, &u.PasswordHash, &u.Role, &ca, &ua); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.DisplayName, &u.PasswordHash, &u.Role, &ca, &ua); err != nil {
 			return nil, err
 		}
 		u.CreatedAt, _ = time.Parse(time.RFC3339, ca)
@@ -142,17 +190,17 @@ func (db *DB) ListUsers() ([]UserRow, error) {
 	return out, rows.Err()
 }
 
-func (db *DB) UpdateUser(id, displayName string, hash []byte) error {
+func (db *DB) UpdateUser(id, username, displayName string, hash []byte) error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
 	now := time.Now().UTC().Format(time.RFC3339)
 	if len(hash) > 0 {
-		_, err := db.Exec("UPDATE users SET display_name=?, password_hash=?, updated_at=? WHERE id=?",
-			displayName, hash, now, id)
+		_, err := db.Exec("UPDATE users SET username=?, display_name=?, password_hash=?, updated_at=? WHERE id=?",
+			username, displayName, hash, now, id)
 		return err
 	}
-	_, err := db.Exec("UPDATE users SET display_name=?, updated_at=? WHERE id=?",
-		displayName, now, id)
+	_, err := db.Exec("UPDATE users SET username=?, display_name=?, updated_at=? WHERE id=?",
+		username, displayName, now, id)
 	return err
 }
 

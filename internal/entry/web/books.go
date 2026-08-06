@@ -39,6 +39,7 @@ type BookMeta struct {
 // Book 是运行中的书会话：一个 host.Host 实例 + 事件广播 hub。
 type Book struct {
 	Meta       BookMeta
+	UserID     string   // 所属用户（隔离维度）
 	host       *host.Host
 	hub        *StreamHub
 	logCleanup func() // 书日志文件关闭函数（Close 时调用）
@@ -66,6 +67,9 @@ func (b *Book) CancelAux() {
 
 // BookManager 管理多本书。每本书对应书架根目录下的一个子目录，
 // 且同一时刻只存在一个 host.Host 实例（flock book lease 语义保证跨进程独占）。
+//
+// 多用户隔离：每个用户一个书架子目录 booksDir/{userID}/，其下有独立的
+// books.json 清单与书籍目录；books 映射 key 为 userID + "/" + bookID。
 //
 // 并发模型：bm.mu 保护 books 映射与生命周期；host.Host 自身并发安全；
 // StreamHub 每书一个消费 goroutine，把 Events()/Stream()/Done() 广播给订阅者。
@@ -99,6 +103,16 @@ func NewBookManager(cfgLoader func() (bootstrap.Config, error), booksDir string)
 // BooksDir 返回书架根目录。
 func (bm *BookManager) BooksDir() string { return bm.booksDir }
 
+// userBooksDir 返回指定用户的书架子目录，并确保存在。
+func (bm *BookManager) userBooksDir(userID string) string {
+	dir := filepath.Join(bm.booksDir, userID)
+	os.MkdirAll(dir, 0o755)
+	return dir
+}
+
+// bookKey 生成 books 映射 key（userID + "/" + bookID）。
+func bookKey(userID, bookID string) string { return userID + "/" + bookID }
+
 // LoadConfig 返回当前有效配置（供全局 profile 配置读写使用）。
 func (bm *BookManager) LoadConfig() (bootstrap.Config, error) {
 	return bm.cfgLoader()
@@ -111,7 +125,7 @@ type CreateRequest struct {
 }
 
 // Create 新建一本快速模式的书并立即启动引擎（同步执行 Arbiter 启动裁定）。
-func (bm *BookManager) Create(req CreateRequest) (*Book, error) {
+func (bm *BookManager) Create(userID string, req CreateRequest) (*Book, error) {
 	plan, err := startup.PrepareQuick(startup.Request{
 		Mode:        startup.ModeQuick,
 		UserPrompt:  req.Prompt,
@@ -122,7 +136,7 @@ func (bm *BookManager) Create(req CreateRequest) (*Book, error) {
 	}
 
 	bm.mu.Lock()
-	book, err := bm.createSessionLocked(req.Title)
+	book, err := bm.createSessionLocked(userID, req.Title)
 	bm.mu.Unlock()
 	if err != nil {
 		return nil, err
@@ -142,15 +156,15 @@ func (bm *BookManager) Create(req CreateRequest) (*Book, error) {
 
 // CreateEmpty 创建一本空书会话（host.New 但引擎不启动），
 // 供共创规划等"先建会话、后启动"的路径使用；随后用 StartWithPrompt 启动。
-func (bm *BookManager) CreateEmpty(title string) (*Book, error) {
+func (bm *BookManager) CreateEmpty(userID, title string) (*Book, error) {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
-	return bm.createSessionLocked(title)
+	return bm.createSessionLocked(userID, title)
 }
 
 // CreateAsync 创建一本快速模式的书并异步启动引擎（不阻塞 HTTP 请求）。
 // 启动裁定进度经该书 hub 广播（DECISION/TOOL 事件），失败以 ERROR 事件回显并回滚。
-func (bm *BookManager) CreateAsync(req CreateRequest) (*Book, error) {
+func (bm *BookManager) CreateAsync(userID string, req CreateRequest) (*Book, error) {
 	plan, err := startup.PrepareQuick(startup.Request{
 		Mode:        startup.ModeQuick,
 		UserPrompt:  req.Prompt,
@@ -159,7 +173,7 @@ func (bm *BookManager) CreateAsync(req CreateRequest) (*Book, error) {
 	if err != nil {
 		return nil, fmt.Errorf("创作需求无效: %w", err)
 	}
-	book, err := bm.CreateEmpty(req.Title)
+	book, err := bm.CreateEmpty(userID, req.Title)
 	if err != nil {
 		return nil, err
 	}
@@ -187,9 +201,9 @@ func (bm *BookManager) CreateAsync(req CreateRequest) (*Book, error) {
 // Remove 从书架移除一本书。
 // keepCompleted=true 时，若书已完结则仅从清单移除（保留目录与小说文件），
 // 否则连同目录一并删除。已完结判定用 Snapshot().Phase。
-func (bm *BookManager) Remove(id string, keepCompleted bool) error {
+func (bm *BookManager) Remove(userID, id string, keepCompleted bool) error {
 	bm.mu.Lock()
-	meta, err := bm.findMetaLocked(id)
+	meta, err := bm.findMetaLocked(userID, id)
 	if err != nil {
 		bm.mu.Unlock()
 		return err
@@ -203,9 +217,9 @@ func (bm *BookManager) Remove(id string, keepCompleted bool) error {
 		bm.mu.Unlock()
 		return fmt.Errorf("非法书目录名 %q", meta.Dir)
 	}
-	b := bm.books[id]
+	b := bm.books[bookKey(userID, id)]
 	if b != nil {
-		delete(bm.books, id)
+		delete(bm.books, bookKey(userID, id))
 	}
 	bm.mu.Unlock()
 
@@ -214,7 +228,7 @@ func (bm *BookManager) Remove(id string, keepCompleted bool) error {
 	if keepCompleted && b != nil && b.host != nil {
 		completed = domain.Phase(b.host.Snapshot().Phase) == domain.PhaseComplete
 	} else if keepCompleted && b == nil {
-		if b2, err := bm.Get(id); err == nil {
+		if b2, err := bm.Get(userID, id); err == nil {
 			completed = domain.Phase(b2.host.Snapshot().Phase) == domain.PhaseComplete
 			// 临时打开的会话必须关闭，否则 flock 目录锁泄漏。
 			b2.hub.Close()
@@ -223,7 +237,7 @@ func (bm *BookManager) Remove(id string, keepCompleted bool) error {
 				b2.logCleanup()
 			}
 			bm.mu.Lock()
-			delete(bm.books, id)
+			delete(bm.books, bookKey(userID, id))
 			bm.mu.Unlock()
 		}
 	}
@@ -239,7 +253,7 @@ func (bm *BookManager) Remove(id string, keepCompleted bool) error {
 
 	// 从清单移除。
 	bm.mu.Lock()
-	if metas, err := bm.loadBooks(); err == nil {
+	if metas, err := bm.loadBooks(userID); err == nil {
 		filtered := metas[:0]
 		for _, m := range metas {
 			if m.ID != id {
@@ -247,7 +261,7 @@ func (bm *BookManager) Remove(id string, keepCompleted bool) error {
 			}
 		}
 		if len(filtered) != len(metas) {
-			if err := bm.saveBooks(filtered); err != nil {
+			if err := bm.saveBooks(userID, filtered); err != nil {
 				bm.mu.Unlock()
 				return fmt.Errorf("更新书架清单: %w", err)
 			}
@@ -257,7 +271,7 @@ func (bm *BookManager) Remove(id string, keepCompleted bool) error {
 
 	// 删除目录（保留完结书时不删）。
 	if !(keepCompleted && completed) {
-		if err := os.RemoveAll(filepath.Join(bm.booksDir, meta.Dir)); err != nil {
+		if err := os.RemoveAll(filepath.Join(bm.userBooksDir(userID), meta.Dir)); err != nil {
 			return fmt.Errorf("删除书目录: %w", err)
 		}
 	}
@@ -281,7 +295,7 @@ func (bm *BookManager) StartWithPrompt(book *Book, prompt string) error {
 
 // createSessionLocked 创建书会话并注册到书架（host.New + hub + books.json），不启动引擎。
 // 调用方须持 bm.mu。
-func (bm *BookManager) createSessionLocked(title string) (*Book, error) {
+func (bm *BookManager) createSessionLocked(userID, title string) (*Book, error) {
 	if bm.closed {
 		return nil, errors.New("book manager 已关闭")
 	}
@@ -294,7 +308,7 @@ func (bm *BookManager) createSessionLocked(title string) (*Book, error) {
 	}
 
 	id := newBookID()
-	dir := filepath.Join(bm.booksDir, id)
+	dir := filepath.Join(bm.userBooksDir(userID), id)
 	cfg.OutputDir = dir // 本书目录
 
 	// 文风资源按本书配置加载（style 与书目录 style/ 覆盖层随之生效）。
@@ -320,16 +334,16 @@ func (bm *BookManager) createSessionLocked(title string) (*Book, error) {
 		book.Meta.Title = "未命名小说"
 	}
 	go book.hub.Run()
-	bm.books[id] = book
+	bm.books[bookKey(userID, id)] = book
 
 	// 持久化书架清单；失败则回滚（关闭引擎、清理目录），避免"在跑但不在书架"。
-	metas, err := bm.loadBooks()
+	metas, err := bm.loadBooks(userID)
 	if err == nil {
 		metas = append(metas, book.Meta)
-		err = bm.saveBooks(metas)
+		err = bm.saveBooks(userID, metas)
 	}
 	if err != nil {
-		delete(bm.books, id)
+		delete(bm.books, bookKey(userID, id))
 		book.hub.Close()
 		eng.Close()
 		if logCleanup != nil {
@@ -345,15 +359,15 @@ func (bm *BookManager) createSessionLocked(title string) (*Book, error) {
 func (bm *BookManager) removeBook(book *Book) {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
-	delete(bm.books, book.Meta.ID)
+	delete(bm.books, bookKey(book.UserID, book.Meta.ID))
 	book.hub.Close()
 	book.host.Close()
 	if book.logCleanup != nil {
 		book.logCleanup()
 	}
-	os.RemoveAll(filepath.Join(bm.booksDir, book.Meta.Dir))
+	os.RemoveAll(filepath.Join(bm.userBooksDir(book.UserID), book.Meta.Dir))
 	// 同步书架清单，避免"僵尸书"残留（书打不开也删不掉）。
-	if metas, err := bm.loadBooks(); err == nil {
+	if metas, err := bm.loadBooks(book.UserID); err == nil {
 		filtered := metas[:0]
 		for _, m := range metas {
 			if m.ID != book.Meta.ID {
@@ -361,7 +375,7 @@ func (bm *BookManager) removeBook(book *Book) {
 			}
 		}
 		if len(filtered) != len(metas) {
-			if err := bm.saveBooks(filtered); err != nil {
+			if err := bm.saveBooks(book.UserID, filtered); err != nil {
 				slog.Warn("web: 移除书清单条目失败", "book", book.Meta.ID, "err", err)
 			}
 		}
@@ -370,17 +384,17 @@ func (bm *BookManager) removeBook(book *Book) {
 
 // Get 打开（或复用）一本书。已打开的会话直接返回；
 // 未打开则创建 host.Host 会话并启动事件广播（引擎不自动恢复，由用户操作触发）。
-func (bm *BookManager) Get(id string) (*Book, error) {
+func (bm *BookManager) Get(userID, id string) (*Book, error) {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
 	if bm.closed {
 		return nil, errors.New("book manager 已关闭")
 	}
-	if b, ok := bm.books[id]; ok {
+	if b, ok := bm.books[bookKey(userID, id)]; ok {
 		return b, nil
 	}
 
-	meta, err := bm.findMetaLocked(id)
+	meta, err := bm.findMetaLocked(userID, id)
 	if err != nil {
 		return nil, err
 	}
@@ -392,7 +406,7 @@ func (bm *BookManager) Get(id string) (*Book, error) {
 		return nil, fmt.Errorf("非法书目录名 %q", meta.Dir)
 	}
 
-	dir := filepath.Join(bm.booksDir, meta.Dir)
+	dir := filepath.Join(bm.userBooksDir(userID), meta.Dir)
 	if st, err := os.Stat(dir); err != nil || !st.IsDir() {
 		return nil, fmt.Errorf("书目录不存在: %s", dir)
 	}
@@ -416,30 +430,30 @@ func (bm *BookManager) Get(id string) (*Book, error) {
 		logCleanup = func() {}
 	}
 
-	book := &Book{Meta: *meta, host: eng, hub: newStreamHub(eng), logCleanup: logCleanup}
+	book := &Book{UserID: userID, Meta: *meta, host: eng, hub: newStreamHub(eng), logCleanup: logCleanup}
 	go book.hub.Run()
-	bm.books[id] = book
+	bm.books[bookKey(userID, id)] = book
 	return book, nil
 }
 
 // List 返回书架清单（books.json 内容，按创建时间排序）。
-func (bm *BookManager) List() ([]BookMeta, error) {
+func (bm *BookManager) List(userID string) ([]BookMeta, error) {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
-	return bm.loadBooks()
+	return bm.loadBooks(userID)
 }
 
 // IsOpen 返回书会话是否已打开（在内存中）。
-func (bm *BookManager) IsOpen(id string) bool {
+func (bm *BookManager) IsOpen(userID, id string) bool {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
-	_, ok := bm.books[id]
+	_, ok := bm.books[bookKey(userID, id)]
 	return ok
 }
 
 // findMetaLocked 在清单中查找书元信息（调用方须持锁）。
-func (bm *BookManager) findMetaLocked(id string) (*BookMeta, error) {
-	metas, err := bm.loadBooks()
+func (bm *BookManager) findMetaLocked(userID, id string) (*BookMeta, error) {
+	metas, err := bm.loadBooks(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -452,8 +466,8 @@ func (bm *BookManager) findMetaLocked(id string) (*BookMeta, error) {
 }
 
 // loadBooks 读取书架清单（books.json）。文件不存在时返回空列表。
-func (bm *BookManager) loadBooks() ([]BookMeta, error) {
-	data, err := os.ReadFile(filepath.Join(bm.booksDir, booksFileName))
+func (bm *BookManager) loadBooks(userID string) ([]BookMeta, error) {
+	data, err := os.ReadFile(filepath.Join(bm.userBooksDir(userID), booksFileName))
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
@@ -470,7 +484,7 @@ func (bm *BookManager) loadBooks() ([]BookMeta, error) {
 }
 
 // saveBooks 写回书架清单。
-func (bm *BookManager) saveBooks(books []BookMeta) error {
+func (bm *BookManager) saveBooks(userID string, books []BookMeta) error {
 	payload := struct {
 		Books []BookMeta `json:"books"`
 	}{Books: books}
@@ -478,7 +492,29 @@ func (bm *BookManager) saveBooks(books []BookMeta) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(bm.booksDir, booksFileName), data, 0o644)
+	return os.WriteFile(filepath.Join(bm.userBooksDir(userID), booksFileName), data, 0o644)
+}
+
+// RemoveAllForUser 关闭并移除指定用户的所有书会话，并删除其书架目录（删除账号时调用）。
+func (bm *BookManager) RemoveAllForUser(userID string) {
+	bm.mu.Lock()
+	prefix := userID + "/"
+	for key, b := range bm.books {
+		if strings.HasPrefix(key, prefix) {
+			if b != nil && b.hub != nil {
+				b.hub.Close()
+			}
+			if b != nil && b.host != nil {
+				b.host.Close()
+			}
+			if b != nil && b.logCleanup != nil {
+				b.logCleanup()
+			}
+			delete(bm.books, key)
+		}
+	}
+	bm.mu.Unlock()
+	os.RemoveAll(filepath.Join(bm.booksDir, userID))
 }
 
 // Close 关闭所有运行中的书并释放目录锁。幂等。

@@ -37,7 +37,8 @@ func (s *Server) registerBookRoutes(mux *http.ServeMux) {
 
 // handleListBooks 返回书架清单（含会话是否已打开）。
 func (s *Server) handleListBooks(w http.ResponseWriter, r *http.Request) {
-	metas, err := s.books.List()
+	uid := UserIDFromContext(r.Context())
+	metas, err := s.books.List(uid)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "读取书架失败: %v", err)
 		return
@@ -49,7 +50,7 @@ func (s *Server) handleListBooks(w http.ResponseWriter, r *http.Request) {
 			"title":      m.Title,
 			"dir":        m.Dir,
 			"created_at": m.CreatedAt,
-			"open":       s.books.IsOpen(m.ID),
+			"open":       s.books.IsOpen(uid, m.ID),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"books": items})
@@ -69,20 +70,26 @@ func (s *Server) handleCreateBook(w http.ResponseWriter, r *http.Request) {
 	if err := decodeBody(w, r, &req); err != nil {
 		return
 	}
+	uid := UserIDFromContext(r.Context())
 	var (
 		book *Book
 		err  error
 	)
 	switch req.Mode {
 	case "", "quick":
-		book, err = s.books.CreateAsync(CreateRequest{Title: req.Title, Prompt: req.Prompt})
+		book, err = s.books.CreateAsync(uid, CreateRequest{Title: req.Title, Prompt: req.Prompt})
 	case "cocreate":
-		book, err = s.books.CreateEmpty(req.Title)
+		book, err = s.books.CreateEmpty(uid, req.Title)
 	default:
 		writeErr(w, http.StatusBadRequest, "mode 必须是 quick 或 cocreate")
 		return
 	}
 	if err != nil {
+		// 未完成引导/无有效配置 → 503（不伪造 AI 输出）；其余 → 400。
+		if strings.Contains(err.Error(), "引导") || strings.Contains(err.Error(), "配置") || strings.Contains(err.Error(), "Provider") {
+			writeErr(w, http.StatusServiceUnavailable, "%v", err)
+			return
+		}
 		writeErr(w, http.StatusBadRequest, "%v", err)
 		return
 	}
@@ -91,9 +98,10 @@ func (s *Server) handleCreateBook(w http.ResponseWriter, r *http.Request) {
 
 // handleDeleteBook 删除一本书；?keep_completed=1 时若书已完结则仅从书架移除（保留目录）。
 func (s *Server) handleDeleteBook(w http.ResponseWriter, r *http.Request) {
+	uid := UserIDFromContext(r.Context())
 	keep := r.URL.Query().Get("keep_completed")
 	keepCompleted := keep == "1" || keep == "true"
-	if err := s.books.Remove(r.PathValue("id"), keepCompleted); err != nil {
+	if err := s.books.Remove(uid, r.PathValue("id"), keepCompleted); err != nil {
 		writeErr(w, http.StatusNotFound, "%v", err)
 		return
 	}
@@ -102,7 +110,8 @@ func (s *Server) handleDeleteBook(w http.ResponseWriter, r *http.Request) {
 
 // handleGetBook 返回书的 UISnapshot 全量状态。
 func (s *Server) handleGetBook(w http.ResponseWriter, r *http.Request) {
-	book, err := s.books.Get(r.PathValue("id"))
+	uid := UserIDFromContext(r.Context())
+	book, err := s.books.Get(uid, r.PathValue("id"))
 	if err != nil {
 		writeErr(w, http.StatusNotFound, "%v", err)
 		return
@@ -112,7 +121,8 @@ func (s *Server) handleGetBook(w http.ResponseWriter, r *http.Request) {
 
 // handleBookStream 是书的 SSE 事件流：先回放历史（ReplayQueue），再订阅实时增量。
 func (s *Server) handleBookStream(w http.ResponseWriter, r *http.Request) {
-	book, err := s.books.Get(r.PathValue("id"))
+	uid := UserIDFromContext(r.Context())
+	book, err := s.books.Get(uid, r.PathValue("id"))
 	if err != nil {
 		writeErr(w, http.StatusNotFound, "%v", err)
 		return
@@ -264,7 +274,8 @@ type modeRequest struct {
 
 // bookFor 按路径参数取书会话；失败时已写响应并返回 false。
 func (s *Server) bookFor(w http.ResponseWriter, r *http.Request) (*Book, bool) {
-	book, err := s.books.Get(r.PathValue("id"))
+	uid := UserIDFromContext(r.Context())
+	book, err := s.books.Get(uid, r.PathValue("id"))
 	if err != nil {
 		writeErr(w, http.StatusNotFound, "%v", err)
 		return nil, false

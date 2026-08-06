@@ -65,6 +65,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/profile", s.guard(s.handleProfile))
 	mux.HandleFunc("GET /api/profile/config", s.guard(s.handleProfileConfig))
 	mux.HandleFunc("POST /api/profile/config", s.guard(s.handleProfileConfigSave))
+	// 自助删除账号（密码验证；管理员不能删除自己）。
+	mux.HandleFunc("DELETE /api/account", s.guard(s.handleAccountDelete))
 	// 管理员端点。
 	mux.HandleFunc("GET /api/admin/users", s.adminGuard(s.handleAdminUsers))
 	mux.HandleFunc("POST /api/admin/users", s.adminGuard(s.handleAdminCreateUser))
@@ -135,6 +137,7 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 	if uid != "" {
 		u, _ := s.auth.db.GetUserByID(uid)
 		if u != nil {
+			out["username"] = u.Username
 			out["display_name"] = u.DisplayName
 			out["role"] = u.Role
 			out["user_id"] = u.ID
@@ -145,6 +148,7 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSetupAuth(w http.ResponseWriter, r *http.Request) {
 	var req struct {
+		Username    string `json:"username"`
 		DisplayName string `json:"display_name"`
 		Password    string `json:"password"`
 	}
@@ -156,7 +160,7 @@ func (s *Server) handleSetupAuth(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 409, "已配置，不能重复初始化")
 		return
 	}
-	user, token, err := s.auth.SetupAdmin(req.DisplayName, req.Password)
+	user, token, err := s.auth.SetupAdmin(req.Username, req.DisplayName, req.Password)
 	if err != nil {
 		writeErr(w, 400, "%v", err)
 		return
@@ -166,6 +170,7 @@ func (s *Server) handleSetupAuth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{
 		"configured":   true,
 		"logged_in":    true,
+		"username":     user.Username,
 		"display_name": user.DisplayName,
 		"role":         user.Role,
 	})
@@ -177,12 +182,15 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 429, "登录过于频繁，请 5 分钟后再试")
 		return
 	}
-	var req struct{ Password string `json:"password"` }
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, 400, "请求格式错误")
 		return
 	}
-	token, user, err := s.auth.Login(req.Password)
+	token, user, err := s.auth.Login(req.Username, req.Password)
 	if err != nil {
 		writeErr(w, 401, "%v", err)
 		return
@@ -191,6 +199,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	SetSessionCookie(w, token)
 	writeJSON(w, 200, map[string]any{
 		"logged_in":    true,
+		"username":     user.Username,
 		"display_name": user.DisplayName,
 		"role":         user.Role,
 	})
@@ -199,6 +208,44 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	s.auth.Logout(r)
 	ClearSessionCookie(w)
+	writeJSON(w, 200, map[string]string{"ok": "true"})
+}
+
+// handleAccountDelete 自助删除当前账号（需密码验证；管理员不能删除自己，防止系统无管理员锁死）。
+func (s *Server) handleAccountDelete(w http.ResponseWriter, r *http.Request) {
+	uid := UserIDFromContext(r.Context())
+	u, _ := s.auth.db.GetUserByID(uid)
+	if u == nil {
+		writeErr(w, 404, "用户不存在")
+		return
+	}
+	if u.Role == "admin" {
+		writeErr(w, 403, "管理员账号不能自助删除，请在「账号管理」中操作")
+		return
+	}
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, "请求格式错误")
+		return
+	}
+	if err := s.auth.VerifyPassword(uid, req.Password); err != nil {
+		writeErr(w, 401, "%v", err)
+		return
+	}
+	if err := s.auth.DeleteUser(uid); err != nil {
+		writeErr(w, 500, "删除账号失败: %v", err)
+		return
+	}
+	// 清理该用户的所有书会话与目录。
+	s.books.RemoveAllForUser(uid)
+	// 清除当前 session。
+	if cookie, err := r.Cookie(cookieName); err == nil {
+		s.auth.db.DeleteSession(cookie.Value)
+	}
+	ClearSessionCookie(w)
+	slog.Info("web: 用户自助删除账号", "user_id", uid, "username", u.Username)
 	writeJSON(w, 200, map[string]string{"ok": "true"})
 }
 
@@ -212,6 +259,7 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 	cfg, _ := s.auth.db.GetUserConfig(uid)
 	out := map[string]any{
 		"user_id":      u.ID,
+		"username":     u.Username,
 		"display_name": u.DisplayName,
 		"role":         u.Role,
 		"created_at":   u.CreatedAt.Format(time.RFC3339),
@@ -221,7 +269,7 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 		out["model"] = cfg.Model
 	}
 	// 统计书数量
-	books, _ := s.books.List()
+	books, _ := s.books.List(uid)
 	out["book_count"] = len(books)
 	writeJSON(w, 200, out)
 }
@@ -288,6 +336,7 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 	for i, u := range users {
 		out[i] = map[string]any{
 			"id":           u.ID,
+			"username":     u.Username,
 			"display_name": u.DisplayName,
 			"role":         u.Role,
 			"created_at":   u.CreatedAt.Format(time.RFC3339),
@@ -298,6 +347,7 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAdminCreateUser(w http.ResponseWriter, r *http.Request) {
 	var req struct {
+		Username    string `json:"username"`
 		DisplayName string `json:"display_name"`
 		Password    string `json:"password"`
 	}
@@ -305,13 +355,14 @@ func (s *Server) handleAdminCreateUser(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "请求格式错误")
 		return
 	}
-	user, err := s.auth.CreateUser(req.DisplayName, req.Password)
+	user, err := s.auth.CreateUser(req.Username, req.DisplayName, req.Password)
 	if err != nil {
 		writeErr(w, 400, "%v", err)
 		return
 	}
 	writeJSON(w, 201, map[string]any{
 		"id":           user.ID,
+		"username":     user.Username,
 		"display_name": user.DisplayName,
 		"role":         user.Role,
 		"created_at":   user.CreatedAt.Format(time.RFC3339),
@@ -321,6 +372,7 @@ func (s *Server) handleAdminCreateUser(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAdminUpdateUser(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var req struct {
+		Username    string `json:"username"`
 		DisplayName string `json:"display_name"`
 		Password    string `json:"password,omitempty"`
 	}
@@ -328,7 +380,7 @@ func (s *Server) handleAdminUpdateUser(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "请求格式错误")
 		return
 	}
-	if err := s.auth.UpdateUser(id, req.DisplayName, req.Password); err != nil {
+	if err := s.auth.UpdateUser(id, req.Username, req.DisplayName, req.Password); err != nil {
 		writeErr(w, 400, "%v", err)
 		return
 	}
