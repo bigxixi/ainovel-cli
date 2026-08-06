@@ -1090,6 +1090,7 @@ func (s *Server) registerSetupRoutes(mux *http.ServeMux) {
 }
 
 // handleGlobalModels 返回全部可选 Provider 及其候选模型（无需书实例，配置对话框用）。
+// 候选模型 = 当前配置中的模型 + Provider 预设的常用模型。
 func (s *Server) handleGlobalModels(w http.ResponseWriter, r *http.Request) {
 	cfg, err := s.books.LoadConfig()
 	if err != nil {
@@ -1097,25 +1098,45 @@ func (s *Server) handleGlobalModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	models := map[string][]string{}
+	presetBy := map[string][]string{}
+	for _, p := range bootstrap.ProviderPresets() {
+		presetBy[p.Name] = p.Models
+	}
 	for name := range cfg.Providers {
-		models[name] = cfg.CandidateModels(name)
+		models[name] = mergeModels(cfg.CandidateModels(name), presetBy[name])
 	}
 	// 附加预设 Provider（即使尚未写入配置，便于首次选择）。
 	for _, p := range bootstrap.ProviderPresets() {
 		if _, ok := models[p.Name]; !ok {
-			models[p.Name] = cfg.CandidateModels(p.Name)
+			models[p.Name] = mergeModels(cfg.CandidateModels(p.Name), p.Models)
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"models": models})
 }
 
+// mergeModels 合并并去重两个模型列表。
+func mergeModels(a, b []string) []string {
+	seen := make(map[string]bool)
+	out := make([]string, 0, len(a)+len(b))
+	for _, m := range append(append([]string(nil), a...), b...) {
+		m = strings.TrimSpace(m)
+		if m == "" || seen[m] {
+			continue
+		}
+		seen[m] = true
+		out = append(out, m)
+	}
+	return out
+}
+
 // setupPreset 是 Provider 预设的 SSE 载荷（小写键）。
 type setupPreset struct {
-	Name           string `json:"name"`
-	Label          string `json:"label"`
-	BaseURL        string `json:"base_url"`
-	NeedType       bool   `json:"need_type"`
-	APIKeyOptional bool   `json:"api_key_optional"`
+	Name           string   `json:"name"`
+	Label          string   `json:"label"`
+	BaseURL        string   `json:"base_url"`
+	NeedType       bool     `json:"need_type"`
+	APIKeyOptional bool     `json:"api_key_optional"`
+	Models         []string `json:"models"`
 }
 
 // handleSetupPresets 返回可选 Provider 预设列表（首次引导页用）。
@@ -1126,6 +1147,7 @@ func (s *Server) handleSetupPresets(w http.ResponseWriter, r *http.Request) {
 		out = append(out, setupPreset{
 			Name: p.Name, Label: p.Label, BaseURL: p.BaseURL,
 			NeedType: p.NeedType, APIKeyOptional: p.APIKeyOptional,
+			Models: p.Models,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"presets": out})

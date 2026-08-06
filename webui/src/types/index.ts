@@ -75,6 +75,7 @@ export interface ProviderPreset {
   base_url: string
   need_type: boolean
   api_key_optional: boolean
+  models: string[]
 }
 
 // 诊断信息

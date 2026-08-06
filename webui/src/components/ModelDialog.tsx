@@ -2,9 +2,10 @@ import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { config, request } from '@/lib/api'
+import { config } from '@/lib/api'
 import { useAppStore } from '@/stores/app'
 import { Loader2 } from 'lucide-react'
 
@@ -23,11 +24,7 @@ export function ModelDialog({ bookId, open, onOpenChange, currentProvider, curre
   const [model, setModel] = useState(currentModel || '')
   const [saving, setSaving] = useState(false)
 
-  const { data: bookModels } = useQuery({
-    queryKey: ['bookModels', bookId],
-    queryFn: () => request<{ providers: string[]; models: Record<string, string[]> }>(`/books/${bookId}/models`),
-    enabled: open,
-  })
+  const { data: modelData } = useQuery({ queryKey: ['models'], queryFn: config.models, enabled: open })
 
   useEffect(() => {
     if (open) {
@@ -36,8 +33,8 @@ export function ModelDialog({ bookId, open, onOpenChange, currentProvider, curre
     }
   }, [open, currentProvider, currentModel])
 
-  const providers = bookModels?.providers || []
-  const models = provider ? bookModels?.models?.[provider] || [] : []
+  const providers = Object.keys(modelData?.models || {})
+  const models = provider ? modelData?.models?.[provider] || [] : []
 
   const save = async () => {
     if (!provider || !model) return
@@ -70,15 +67,21 @@ export function ModelDialog({ bookId, open, onOpenChange, currentProvider, curre
             </Select>
           </div>
           <div className="space-y-2">
-            <Label>模型</Label>
-            <Select value={model} onValueChange={(v) => setModel(v || '')} disabled={!provider}>
-              <SelectTrigger className="w-full"><SelectValue placeholder={provider ? '选择模型' : '请先选择 Provider'} /></SelectTrigger>
-              <SelectContent>
-                {models.map(m => (
-                  <SelectItem key={m} value={m}>{m}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Label htmlFor="model">模型</Label>
+            <Input
+              id="model"
+              list={`models-${provider || 'none'}`}
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              placeholder={provider ? '选择或直接输入模型名' : '请先选择 Provider'}
+              className="h-10"
+            />
+            {models.length > 0 && (
+              <datalist id={`models-${provider}`}>
+                {models.map(m => <option key={m} value={m} />)}
+              </datalist>
+            )}
+            <p className="text-[11px] text-muted-foreground">可从常用模型中选择，也可直接输入模型名称</p>
           </div>
           <Button onClick={save} disabled={saving || !provider || !model} className="w-full">
             {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}应用

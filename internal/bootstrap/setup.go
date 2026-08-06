@@ -38,6 +38,7 @@ type setupProvider struct {
 	baseURL        string // 预填的 base_url
 	needType       bool   // 自定义代理需要额外问 type 和 base_url
 	apiKeyOptional bool   // true 表示 API Key 允许留空
+	models         []string // 该 Provider 的常用模型名（可选，供前端下拉/提示）
 }
 
 // ProviderPreset 是首次引导和运行时 /config 共用的 provider 目录项。
@@ -47,18 +48,28 @@ type ProviderPreset struct {
 	BaseURL        string
 	NeedType       bool
 	APIKeyOptional bool
+	Models         []string
 }
 
 var setupProviders = []setupProvider{
-	{name: "openrouter", label: "OpenRouter", baseURL: "https://openrouter.ai/api/v1"},
-	{name: "anthropic", label: "Anthropic"},
-	{name: "gemini", label: "Gemini"},
-	{name: "openai", label: "OpenAI"},
-	{name: "deepseek", label: "DeepSeek"},
-	{name: "qwen", label: "Qwen"},
-	{name: "glm", label: "GLM"},
-	{name: "grok", label: "Grok"},
-	{name: "ollama", label: "Ollama", baseURL: "http://localhost:11434/v1", apiKeyOptional: true},
+	{name: "openrouter", label: "OpenRouter", baseURL: "https://openrouter.ai/api/v1",
+		models: []string{"anthropic/claude-sonnet-4-5", "anthropic/claude-opus-4-5", "openai/gpt-5", "google/gemini-2.5-pro", "deepseek/deepseek-chat"}},
+	{name: "anthropic", label: "Anthropic",
+		models: []string{"claude-sonnet-4-5", "claude-opus-4-5", "claude-haiku-4-5"}},
+	{name: "gemini", label: "Gemini",
+		models: []string{"gemini-2.5-pro", "gemini-2.5-flash"}},
+	{name: "openai", label: "OpenAI",
+		models: []string{"gpt-5", "gpt-5-mini", "o3"}},
+	{name: "deepseek", label: "DeepSeek",
+		models: []string{"deepseek-chat", "deepseek-reasoner", "deepseek-v4-flash"}},
+	{name: "qwen", label: "Qwen",
+		models: []string{"qwen3-max", "qwen3-235b-a22b", "qwen3-32b"}},
+	{name: "glm", label: "GLM",
+		models: []string{"glm-4-plus", "glm-4-flash", "glm-4-air"}},
+	{name: "grok", label: "Grok",
+		models: []string{"grok-4", "grok-3"}},
+	{name: "ollama", label: "Ollama", baseURL: "http://localhost:11434/v1", apiKeyOptional: true,
+		models: []string{"qwen3:32b", "llama3.3:70b", "deepseek-r1:32b"}},
 	{name: "bedrock", label: "Bedrock", apiKeyOptional: true},
 	{name: "custom", label: "Custom Proxy", needType: true, apiKeyOptional: true},
 }
@@ -70,6 +81,7 @@ func ProviderPresets() []ProviderPreset {
 		out = append(out, ProviderPreset{
 			Name: preset.name, Label: preset.label, BaseURL: preset.baseURL,
 			NeedType: preset.needType, APIKeyOptional: preset.apiKeyOptional,
+			Models: append([]string(nil), preset.models...),
 		})
 	}
 	return out

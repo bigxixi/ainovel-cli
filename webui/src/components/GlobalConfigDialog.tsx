@@ -87,15 +87,21 @@ export function GlobalConfigDialog({ open, onOpenChange }: Props) {
           </div>
 
           <div className="space-y-2">
-            <Label>模型</Label>
-            <Select value={model} onValueChange={(v) => setModel(v || '')} disabled={!provider}>
-              <SelectTrigger className="w-full"><SelectValue placeholder={provider ? '选择模型' : '请先选择 Provider'} /></SelectTrigger>
-              <SelectContent>
-                {models.map((m) => (
-                  <SelectItem key={m} value={m}>{m}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Label htmlFor="model">模型</Label>
+            <Input
+              id="model"
+              list={`models-${provider || 'none'}`}
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              placeholder={provider ? '选择或直接输入模型名' : '请先选择 Provider'}
+              className="h-10"
+            />
+            {models.length > 0 && (
+              <datalist id={`models-${provider}`}>
+                {models.map(m => <option key={m} value={m} />)}
+              </datalist>
+            )}
+            <p className="text-[11px] text-muted-foreground">可从常用模型中选择，也可直接输入模型名称（如列表外的自定义模型）</p>
           </div>
 
           <div className="space-y-2">
