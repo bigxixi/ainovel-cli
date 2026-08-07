@@ -15,6 +15,7 @@ import {
   ArrowLeft, Send, Square, Play, SkipForward, Loader2, Zap, ZapOff,
   PanelRightClose, PanelRightOpen, ChevronDown, ChevronUp, ArrowDownToLine,
   RotateCcw, ListChecks, Sparkles, BookDown, UploadCloud, Cpu,
+  FileText, ListOrdered, Users,
 } from 'lucide-react'
 import type { Snapshot, StreamEvent } from '@/types'
 
@@ -185,6 +186,8 @@ export function WorkspacePage() {
   const totalChars = blocks.reduce((s, b) => s + b.text.length, 0)
 
   // 执行命令
+  const isStoppingErr = (e: any) => /正在完成上一轮停止|请稍后重试/.test(e?.message || '')
+
   const runCommand = useCallback(async (cmd: string) => {
     if (!id) return
     const parts = cmd.slice(1).split(/\s+/)
@@ -198,7 +201,16 @@ export function WorkspacePage() {
       else if (cmdName === 'auto') await controls.advanceMode(id, 'auto')
       else if (cmdName === 'next') await controls.advance(id)
       else if (cmdName === 'abort') await controls.abort(id)
-      else if (cmdName === 'resume') await controls.resume(id)
+      else if (cmdName === 'resume') {
+        try {
+          await controls.resume(id)
+        } catch (e: any) {
+          if (isStoppingErr(e)) {
+            await new Promise(r => setTimeout(r, 1500))
+            await controls.resume(id)
+          } else throw e
+        }
+      }
       else if (cmdName === 'reopen') await controls.reopen(id)
       else if (cmdName === 'think-on') await config.setThinking(id, true)
       else if (cmdName === 'think-off') await config.setThinking(id, false)
@@ -223,7 +235,14 @@ export function WorkspacePage() {
         if (snap?.runtime_state === 'running') {
           await controls.steer(id, text.trim())
         } else {
-          await controls.continue(id, text.trim())
+          try {
+            await controls.continue(id, text.trim())
+          } catch (e: any) {
+            if (isStoppingErr(e)) {
+              await new Promise(r => setTimeout(r, 1500))
+              await controls.continue(id, text.trim())
+            } else throw e
+          }
         }
         toast('已发送')
       } catch (e: any) {
@@ -356,19 +375,68 @@ export function WorkspacePage() {
 
         {/* 右侧上下文栏 */}
         {detailOpen && (
-          <div className="w-60 border-l bg-card p-4 shrink-0 overflow-auto hidden sm:block">
-            <h3 className="font-semibold text-sm mb-3 text-foreground">详情</h3>
-            <dl className="space-y-2 text-xs">
-              <DetailItem label="阶段" value={phaseLabel(snap.phase)} />
-              <DetailItem label="推进模式" value={snap.advance_mode === 'review' ? '逐章验收' : '全自动'} />
-              <DetailItem label="已完成" value={`${snap.completed_count ?? 0} 章`} />
-              <DetailItem label="当前" value={`第 ${snap.chapter || 0} 章`} />
-              <DetailItem label="思考模式" value={snap.thinking ? '开' : '关'} />
-              <DetailItem label="导入中" value={snap.is_importing ? '是' : '否'} />
-              <DetailItem label="仿写中" value={snap.is_simulating ? '是' : '否'} />
-            </dl>
+          <div className="w-72 border-l bg-card p-3 shrink-0 overflow-auto hidden sm:block space-y-4">
+            <div>
+              <h3 className="font-semibold text-xs mb-2 text-foreground">概览</h3>
+              <dl className="space-y-1.5 text-[11px]">
+                <DetailItem label="阶段" value={phaseLabel(snap.phase)} />
+                <DetailItem label="推进模式" value={snap.advance_mode === 'review' ? '逐章验收' : '全自动'} />
+                <DetailItem label="进度" value={`${snap.completed_count ?? 0} / ${snap.total_chapters || '?'} 章`} />
+                <DetailItem label="当前" value={`第 ${snap.chapter || 0} 章`} />
+                <DetailItem label="字数" value={(snap.word_count ?? 0).toLocaleString()} />
+                <DetailItem label="思考模式" value={snap.thinking ? '开' : '关'} />
+              </dl>
+            </div>
+
+            {snap.premise && (
+              <div>
+                <h3 className="font-semibold text-xs mb-1.5 text-primary flex items-center gap-1"><FileText className="h-3 w-3" />前提</h3>
+                <p className="text-[11px] leading-relaxed text-muted-foreground whitespace-pre-wrap break-words line-clamp-6">{snap.premise}</p>
+              </div>
+            )}
+
+            {snap.outline && snap.outline.length > 0 && (
+              <div>
+                <h3 className="font-semibold text-xs mb-1.5 text-primary flex items-center gap-1"><ListOrdered className="h-3 w-3" />大纲</h3>
+                <ul className="space-y-1.5">
+                  {snap.outline.map(o => {
+                    const done = o.chapter <= (snap.completed_count ?? 0)
+                    const active = o.chapter === snap.chapter
+                    return (
+                      <li key={o.chapter} className={`text-[11px] leading-snug ${active ? 'text-foreground' : 'text-muted-foreground'}`}>
+                        <div className="flex items-baseline gap-1.5">
+                          <span className={`shrink-0 ${done ? 'text-primary' : active ? 'text-primary' : 'text-muted-foreground/60'}`}>{done ? '●' : active ? '◉' : '○'}</span>
+                          <span className="font-medium">{o.chapter} {o.title}</span>
+                        </div>
+                        {o.core_event && active && (
+                          <p className="ml-4 mt-0.5 text-[10px] text-muted-foreground/80 line-clamp-3">{o.core_event}</p>
+                        )}
+                      </li>
+                    )
+                  })}
+                </ul>
+              </div>
+            )}
+
+            {snap.characters && snap.characters.length > 0 && (
+              <div>
+                <h3 className="font-semibold text-xs mb-1.5 text-primary flex items-center gap-1"><Users className="h-3 w-3" />角色</h3>
+                <ul className="space-y-1 text-[11px] text-muted-foreground">
+                  {snap.characters.map((c, i) => (
+                    <li key={i} className="flex items-baseline gap-1.5">
+                      <span className="text-primary/60 shrink-0">·</span>
+                      <span className="break-words">{c}</span>
+                    </li>
+                  ))}
+                </ul>
+                {snap.supporting && snap.supporting.length > 0 && (
+                  <p className="mt-1.5 text-[10px] text-muted-foreground/70">近期配角：{snap.supporting.join('、')}</p>
+                )}
+              </div>
+            )}
+
             {snap.last_error && (
-              <div className="mt-3 p-2 rounded bg-destructive/10 text-destructive text-xs">
+              <div className="p-2 rounded bg-destructive/10 text-destructive text-[11px]">
                 {snap.last_error}
               </div>
             )}

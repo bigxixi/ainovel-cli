@@ -134,6 +134,23 @@ func (e *engine) isRunning() bool {
 	return e.running
 }
 
+// waitStopped 有界等待上一轮 Engine goroutine 退出（running 落回 false）。
+// 停机(abort)后 goroutine 的收尾 defer(runEnded/checkpoint)可能耗时数秒，
+// 期间 Resume/Continue 若立即读到 running=true 会误报"正在完成上一轮停止"。
+// 调用方必须在未持有 Host.mu 时调用——goroutine 收尾会经 runEnded 抢 Host.mu。
+func (e *engine) waitStopped(timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		if !e.isRunning() {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 // enqueue 把干预的控制态动作排入边界队列(引擎运行中);返回 false 表示未运行,
 // 调用方应立即自行执行。
 func (e *engine) enqueue(op controlOp) bool {

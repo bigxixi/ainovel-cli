@@ -424,6 +424,9 @@ func (h *Host) startEngine(initial *flow.Instruction) bool {
 			Summary: "存在未完成的外部小说导入，请先执行 /import 恢复完成后再继续创作"})
 		return false
 	}
+	// 上一轮 abort 后 goroutine 的收尾 defer 可能仍在跑；有界等待其退出，
+	// 避免 Resume/Continue 紧接暂停时误报"正在完成上一轮停止"。必须在抢 h.mu 前等待。
+	h.engine.waitStopped(5 * time.Second)
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.closing {

@@ -112,6 +112,12 @@ func (s *Server) handleDeleteBook(w http.ResponseWriter, r *http.Request) {
 // snapshotDTO 是 /api/books/{id} 的前端契约（小写键）。host.UISnapshot 无 json tag，
 // 直接 Marshal 会输出 PascalCase，与前端字段（provider/model/chapter/word_count…）不符，
 // 导致模型对话框空选、"undefined 章"、字数为 0 等问题；这里显式映射为前端约定字段。
+type outlineEntryDTO struct {
+	Chapter   int    `json:"chapter"`
+	Title     string `json:"title"`
+	CoreEvent string `json:"core_event,omitempty"`
+}
+
 type snapshotDTO struct {
 	Provider      string `json:"provider"`
 	Model         string `json:"model"`
@@ -128,6 +134,11 @@ type snapshotDTO struct {
 	ThinkingLevel string `json:"thinking_level"`
 	ChapterTitle  string `json:"chapter_title,omitempty"`
 	Premise       string `json:"premise,omitempty"`
+	Outline       []outlineEntryDTO `json:"outline,omitempty"`
+	Characters    []string          `json:"characters,omitempty"`
+	Supporting    []string          `json:"supporting,omitempty"`
+	VolumeArc     string            `json:"volume_arc,omitempty"`
+	NextVolume    string            `json:"next_volume,omitempty"`
 	IsRunning     bool   `json:"is_running"`
 	IsImporting   bool   `json:"is_importing"`
 	IsSimulating  bool   `json:"is_simulating"`
@@ -140,10 +151,11 @@ func toSnapshotDTO(s host.UISnapshot) snapshotDTO {
 	if chapter == 0 && s.InProgressChapter > 0 {
 		chapter = s.InProgressChapter
 	}
+	outline := make([]outlineEntryDTO, 0, len(s.Outline))
 	for _, o := range s.Outline {
+		outline = append(outline, outlineEntryDTO{Chapter: o.Chapter, Title: o.Title, CoreEvent: o.CoreEvent})
 		if o.Chapter == chapter {
 			title = o.Title
-			break
 		}
 	}
 	thinkingOn := s.ThinkingLevel != "" && s.ThinkingLevel != "off" && s.ThinkingLevel != "none"
@@ -163,6 +175,11 @@ func toSnapshotDTO(s host.UISnapshot) snapshotDTO {
 		ThinkingLevel:  s.ThinkingLevel,
 		ChapterTitle:   title,
 		Premise:        s.Premise,
+		Outline:        outline,
+		Characters:     s.Characters,
+		Supporting:     s.RecentSupporting,
+		VolumeArc:      s.CurrentVolumeArc,
+		NextVolume:     s.NextVolumeTitle,
 		IsRunning:      s.IsRunning,
 	}
 }

@@ -27,9 +27,20 @@ export interface Snapshot {
   model: string
   novel_name?: string
   premise?: string
+  outline?: OutlineEntry[]
+  characters?: string[]
+  supporting?: string[]
+  volume_arc?: string
+  next_volume?: string
   last_error?: string
   chapter_title?: string
   featured_pending?: boolean
+}
+
+export interface OutlineEntry {
+  chapter: number
+  title: string
+  core_event?: string
 }
 
 // SSE 事件
