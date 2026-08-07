@@ -2,7 +2,7 @@ import type {
   AuthStatus, BookMeta, Snapshot, StreamEvent,
   LoginRequest, SetupAuthRequest, ProfileConfig,
   CreateBookRequest, TextRequest, ModeRequest,
-  ImportRequest, ExportRequest, CoCreateRequest,
+  ImportRequest, ExportRequest, ExportResult, CoCreateRequest,
   CoCreateMessage, UserInfo, AdminUserRequest,
   DiagInfo, ProviderPreset,
 } from '@/types'
@@ -119,7 +119,7 @@ export const tools = {
     request<{ ok: boolean }>(`/books/${bookId}/import/cancel`, { method: 'POST' }),
 
   export_: (bookId: string, req?: ExportRequest) =>
-    request<{ ok: boolean; file: string; url: string }>(`/books/${bookId}/export`, { method: 'POST', body: JSON.stringify(req || {}) }),
+    request<ExportResult>(`/books/${bookId}/export`, { method: 'POST', body: JSON.stringify(req || {}) }),
 
   exportURL: (bookId: string, file: string) =>
     `${BASE}/books/${bookId}/export-file?name=${encodeURIComponent(file)}`,
@@ -132,23 +132,26 @@ export const cocreate = {
     const iter = sseStream(url, { method: 'POST', body: JSON.stringify({ messages }) })
     return (async function* () {
       for await (const ev of iter) {
+        const text = sseText(ev.data)
         if (ev.event === 'delta') {
-          yield { role: 'assistant', content: ev.data }
+          yield { role: 'assistant', content: text }
         } else if (ev.event === 'thinking') {
-          yield { role: 'assistant', content: '', thinking: ev.data }
+          yield { role: 'assistant', content: '', thinking: text }
+        } else if (ev.event === 'draft') {
+          yield { role: 'assistant', content: '', draft: text }
         } else if (ev.event === 'suggestion') {
-          yield { role: 'assistant', content: '', suggestions: [ev.data] }
+          yield { role: 'assistant', content: '', suggestions: [text] }
         } else if (ev.event === 'done') {
           return
         } else if (ev.event === 'error') {
-          throw new ApiError(500, ev.data)
+          throw new ApiError(500, text)
         }
       }
     })()
   },
 
-  apply: (bookId: string) =>
-    request<{ ok: boolean }>(`/books/${bookId}/cocreate/apply`, { method: 'POST' }),
+  apply: (bookId: string, draft: string, stage = false) =>
+    request<{ ok: boolean }>(`/books/${bookId}/cocreate/apply`, { method: 'POST', body: JSON.stringify({ draft, stage }) }),
 
   cancel: (bookId: string) =>
     request<{ ok: boolean }>(`/books/${bookId}/cocreate/cancel`, { method: 'POST' }),
@@ -167,6 +170,14 @@ export const config = {
   presets: () => request<{ presets: ProviderPreset[] }>('/setup/presets'),
 
   models: () => request<{ models: Record<string, string[]> }>('/models'),
+
+  providerModels: (draft: { provider: string; base_url?: string; api_key?: string }) =>
+    request<{ provider: string; models: string[]; source: 'live' | 'preset' }>(
+      '/provider/models', { method: 'POST', body: JSON.stringify(draft) }),
+
+  providerTest: (draft: { provider: string; model: string; base_url?: string; api_key?: string }) =>
+    request<{ ok: boolean; message: string }>(
+      '/provider/test', { method: 'POST', body: JSON.stringify(draft) }),
 
   globalConfig: () => request<ProfileConfig>('/profile/config'),
 
@@ -200,6 +211,16 @@ export const config = {
 interface SSERawEvent {
   event: string
   data: string
+}
+
+// SSE data 帧统一为 JSON 编码字符串；还原为人类可读文本（含真实换行/引号）
+function sseText(data: string): string {
+  try {
+    const v = JSON.parse(data)
+    return typeof v === 'string' ? v : data
+  } catch {
+    return data
+  }
 }
 
 async function* sseStream(url: string, init?: RequestInit): AsyncGenerator<SSERawEvent> {
@@ -245,7 +266,7 @@ export function connectBookStream(bookId: string): AsyncGenerator<StreamEvent & 
       if (ev.event === 'event') {
         try { yield { type: 'event', ...JSON.parse(ev.data) } } catch { /* skip */ }
       } else if (ev.event === 'delta') {
-        yield { type: 'delta', time: '', category: '', summary: ev.data }
+        yield { type: 'delta', time: '', category: '', summary: sseText(ev.data) }
       } else if (ev.event === 'clear') {
         yield { type: 'clear', time: '', category: '', summary: '' }
       } else if (ev.event === 'done') {

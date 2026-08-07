@@ -6,21 +6,22 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { books, controls, config, tools, connectBookStream } from '@/lib/api'
+import { books, controls, config, connectBookStream } from '@/lib/api'
 import { useAppStore } from '@/stores/app'
 import { ImportDialog } from '@/components/ImportDialog'
 import { ModelDialog } from '@/components/ModelDialog'
+import { ExportDialog } from '@/components/ExportDialog'
 import {
   ArrowLeft, Send, Square, Play, SkipForward, Loader2, Zap, ZapOff,
   PanelRightClose, PanelRightOpen, ChevronDown, ChevronUp, ArrowDownToLine,
-  CheckCircle2, RefreshCw, RotateCcw, ListChecks, Sparkles, BookDown, UploadCloud, Cpu,
+  RotateCcw, ListChecks, Sparkles, BookDown, UploadCloud, Cpu,
 } from 'lucide-react'
 import type { Snapshot, StreamEvent } from '@/types'
 
 // 输出块：段落级文本（虚拟滚动最小单元）
 interface Block {
   id: number
-  kind: 'text' | 'chapter' | 'error'
+  kind: 'text' | 'chapter' | 'error' | 'divider'
   text: string
 }
 
@@ -31,9 +32,12 @@ const COMMANDS = [
   { name: '/next', label: '放行下一章', icon: SkipForward, desc: '验收模式下放行下一章' },
   { name: '/abort', label: '暂停', icon: Square, desc: '暂停当前创作' },
   { name: '/resume', label: '恢复', icon: Play, desc: '恢复暂停的创作' },
-  { name: '/reopen', label: '重开', icon: RotateCcw, desc: '重开当前章节' },
+  { name: '/reopen', label: '重开', icon: RotateCcw, desc: '重开当前章节续写' },
   { name: '/think-on', label: '思考开', icon: Zap, desc: '开启思考模式' },
   { name: '/think-off', label: '思考关', icon: ZapOff, desc: '关闭思考模式' },
+  { name: '/model', label: '切换模型', icon: Cpu, desc: '切换当前书的 Provider 与模型' },
+  { name: '/import', label: '导入小说', icon: UploadCloud, desc: '导入外部小说（上传或路径）' },
+  { name: '/export', label: '导出小说', icon: BookDown, desc: '导出已完成章节为 TXT/EPUB' },
 ] as const
 
 export function WorkspacePage() {
@@ -46,14 +50,15 @@ export function WorkspacePage() {
   const [detailOpen, setDetailOpen] = useState(true)
   const [eventsOpen, setEventsOpen] = useState(true)
   const [followScroll, setFollowScroll] = useState(true)
-  const [exporting, setExporting] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
   const [modelOpen, setModelOpen] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
   const eventsEnd = useRef<HTMLDivElement>(null)
   const outputRef = useRef<HTMLDivElement>(null)
   const blockId = useRef(0)
   const pendingDelta = useRef('')
   const rafPending = useRef(false)
+  const pendingOpen = useRef(false)
 
   const { data: snap, isLoading, refetch } = useQuery({
     queryKey: ['snapshot', id],
@@ -62,7 +67,38 @@ export function WorkspacePage() {
     refetchInterval: 5000,
   })
 
-  // 追加输出块（rAF 节流，按行切块）
+  const appendText = useCallback((raw: string) => {
+    if (!raw) return
+    setBlocks(prev => {
+      const next = [...prev]
+      const isChapterHead = (s: string) =>
+        /^第[0-9一二三四五六七八九十百千零两]+章/.test(s) || /^#{1,3}\s/.test(s)
+
+      const segments = raw.split('\n')
+      segments.forEach((seg, idx) => {
+        const last = next[next.length - 1]
+        const continuePrev = idx === 0 && pendingOpen.current && last && last.kind === 'text'
+        if (continuePrev) {
+          next[next.length - 1] = { ...last, text: last.text + seg }
+        } else if (seg !== '') {
+          if (isChapterHead(seg)) {
+            next.push({ id: ++blockId.current, kind: 'chapter', text: seg.replace(/^#{1,3}\s*/, '').trim() })
+          } else {
+            next.push({ id: ++blockId.current, kind: 'text', text: seg })
+          }
+        }
+      })
+      pendingOpen.current = !raw.endsWith('\n')
+      return next
+    })
+  }, [])
+
+  const flushDelta = useCallback(() => {
+    const raw = pendingDelta.current
+    pendingDelta.current = ''
+    appendText(raw)
+  }, [appendText])
+
   const pushDelta = useCallback((text: string) => {
     pendingDelta.current += text
     if (rafPending.current) return
@@ -71,56 +107,51 @@ export function WorkspacePage() {
       rafPending.current = false
       const raw = pendingDelta.current
       pendingDelta.current = ''
-      if (!raw) return
-      setBlocks(prev => {
-        const lines = raw.split(/(?<=\n)/)
-        const next = [...prev]
-        for (const line of lines) {
-          const trimmed = line.trimEnd()
-          if (!trimmed) continue
-          if (/^第[0-9一二三四五六七八九十百千]+章/.test(trimmed)) {
-            next.push({ id: ++blockId.current, kind: 'chapter', text: trimmed })
-          } else {
-            const last = next[next.length - 1]
-            if (last && last.kind === 'text' && last.text.length < 2000) {
-              next[next.length - 1] = { ...last, text: last.text + trimmed }
-            } else {
-              next.push({ id: ++blockId.current, kind: 'text', text: trimmed })
-            }
-          }
-        }
-        return next
-      })
+      appendText(raw)
     })
-  }, [])
+  }, [appendText])
 
   // SSE 连接
   useEffect(() => {
     if (!id) return
     let running = true
+    let warned = false
     const connect = async () => {
       try {
         const stream = connectBookStream(id)
+        warned = false
         for await (const ev of stream) {
           if (!running) break
           if (ev.type === 'event') {
-            setEvents(prev => [...prev, ev as StreamEvent])
+            const se = ev as StreamEvent & { level?: string; failed?: boolean }
+            setEvents(prev => [...prev, se])
+            if (se.level === 'error' || se.failed || se.category === 'ERROR') {
+              toast(se.summary || '引擎报错', 'error')
+              setBlocks(prev => [...prev, { id: ++blockId.current, kind: 'error', text: `⚠ ${se.summary || '引擎报错'}` }])
+            }
             setTimeout(() => eventsEnd.current?.scrollIntoView({ behavior: 'smooth' }), 50)
           } else if (ev.type === 'delta') {
             pushDelta((ev as unknown as { summary: string }).summary)
           } else if (ev.type === 'clear') {
-            setBlocks([])
+            flushDelta()
+            pendingOpen.current = false
+            setBlocks(prev => (prev.length === 0 || prev[prev.length - 1].kind === 'divider')
+              ? prev
+              : [...prev, { id: ++blockId.current, kind: 'divider', text: '' }])
           } else if (ev.type === 'done') {
             refetch()
           }
         }
       } catch {
-        if (running) setTimeout(connect, 3000)
+        if (running) {
+          if (!warned) { toast('连接中断，正在重连…', 'error'); warned = true }
+          setTimeout(connect, 3000)
+        }
       }
     }
     connect()
     return () => { running = false }
-  }, [id, refetch, pushDelta])
+  }, [id, refetch, pushDelta, flushDelta, toast])
 
   // 自动滚动跟随（用户上滚时暂停）
   const onScroll = useCallback(() => {
@@ -144,7 +175,9 @@ export function WorkspacePage() {
     estimateSize: (i) => {
       const b = blocks[i]
       if (!b) return 40
-      return Math.ceil(b.text.length / 42) * 24 + 8
+      if (b.kind === 'divider') return 20
+      if (b.kind === 'chapter') return 44
+      return Math.ceil(b.text.length / 46) * 22 + 12
     },
     overscan: 8,
   })
@@ -156,6 +189,10 @@ export function WorkspacePage() {
     if (!id) return
     const parts = cmd.slice(1).split(/\s+/)
     const cmdName = parts[0]
+    // 打开对话框类命令（无需请求后端）
+    if (cmdName === 'export') { setExportOpen(true); return }
+    if (cmdName === 'model') { setModelOpen(true); return }
+    if (cmdName === 'import') { setImportOpen(true); return }
     try {
       if (cmdName === 'review') await controls.advanceMode(id, 'review')
       else if (cmdName === 'auto') await controls.advanceMode(id, 'auto')
@@ -165,12 +202,7 @@ export function WorkspacePage() {
       else if (cmdName === 'reopen') await controls.reopen(id)
       else if (cmdName === 'think-on') await config.setThinking(id, true)
       else if (cmdName === 'think-off') await config.setThinking(id, false)
-      else if (cmdName === 'export') {
-        setExporting(true)
-        const res = await tools.export_(id)
-        window.open(tools.exportURL(id, res.file), '_blank')
-        setExporting(false)
-      } else {
+      else {
         toast(`未知命令: ${cmdName}`, 'error')
         return
       }
@@ -201,8 +233,30 @@ export function WorkspacePage() {
     setInput('')
   }, [id, snap, controls, toast, runCommand])
 
+  const [cmdIndex, setCmdIndex] = useState(0)
+  const cmdMenuOpen = input.startsWith('/')
+  const filteredCommands = cmdMenuOpen
+    ? COMMANDS.filter(c => c.name.startsWith(input.split(/\s+/)[0]))
+    : []
+
+  const pickCommand = useCallback((name: string) => {
+    setInput('')
+    runCommand(name)
+  }, [runCommand])
+
+  const onInputKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (cmdMenuOpen && filteredCommands.length > 0) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setCmdIndex(i => (i + 1) % filteredCommands.length); return }
+      if (e.key === 'ArrowUp') { e.preventDefault(); setCmdIndex(i => (i - 1 + filteredCommands.length) % filteredCommands.length); return }
+      if (e.key === 'Tab') { e.preventDefault(); setInput(filteredCommands[cmdIndex].name + ' '); setCmdIndex(0); return }
+      if (e.key === 'Enter') { e.preventDefault(); pickCommand(filteredCommands[cmdIndex].name); return }
+      if (e.key === 'Escape') { e.preventDefault(); setInput(''); return }
+    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input) }
+  }, [cmdMenuOpen, filteredCommands, cmdIndex, pickCommand, send, input])
+
   const phaseLabel = (p?: string) => {
-    const map: Record<string, string> = { init: '初始化', waiting: '等待', plan: '规划中', writing: '写作中', review: '验收中', edit: '编辑中', complete: '已完成', '': '空闲' }
+    const map: Record<string, string> = { init: '初始化', premise: '立意', outline: '细纲', writing: '写作中', complete: '已完成', '': '空闲' }
     return map[p || ''] || p || '未知'
   }
 
@@ -223,7 +277,7 @@ export function WorkspacePage() {
           <Badge variant="outline">{phaseLabel(snap.phase)}</Badge>
           <Badge variant="outline">{snap.provider || '-'}/{snap.model || '-'}</Badge>
           <span className="text-xs text-muted-foreground hidden sm:inline">
-            第 {snap.chapter}/{snap.total_chapters || '?'} 章 · {snap.completed_count} 完成 · {totalChars.toLocaleString()} 字
+            第 {snap.chapter || 0}/{snap.total_chapters || '?'} 章 · {snap.completed_count ?? 0} 完成 · {(snap.word_count ?? 0).toLocaleString()} 字
           </span>
         </div>
         <Button variant="ghost" size="icon" onClick={() => setDetailOpen(!detailOpen)} title="详情面板">
@@ -238,7 +292,7 @@ export function WorkspacePage() {
           <div className="relative flex-1 flex flex-col min-h-0">
             <div className="flex items-center gap-2 px-4 py-1.5 border-b bg-background/60 shrink-0">
               <span className="text-xs font-medium text-muted-foreground">输出</span>
-              <span className="text-xs text-muted-foreground">{blocks.length} 段 · {totalChars.toLocaleString()} 字</span>
+              <span className="text-xs text-muted-foreground">{blocks.length} 段 · 本次 {totalChars.toLocaleString()} 字</span>
               <div className="flex-1" />
               <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => { setFollowScroll(true); outputRef.current?.scrollTo({ top: outputRef.current.scrollHeight }) }}>
                 <ArrowDownToLine className="h-3 w-3 mr-1" />跳到底部
@@ -256,13 +310,19 @@ export function WorkspacePage() {
                       style={{ position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${vi.start}px)` }}
                     >
                       {b.kind === 'chapter' ? (
-                        <div className="py-2 mt-2 mb-1 border-b border-dashed text-left">
-                          <span className="text-sm font-semibold text-primary">{b.text}</span>
+                        <div className="py-1.5 mt-3 mb-1 border-b border-primary/20 text-left">
+                          <span className="text-[13px] font-semibold text-primary tracking-wide">{b.text}</span>
                         </div>
                       ) : b.kind === 'error' ? (
-                        <div className="py-1 text-sm text-destructive text-left">{b.text}</div>
+                        <div className="my-1 rounded bg-destructive/10 px-2 py-1 text-xs text-destructive text-left">{b.text}</div>
+                      ) : b.kind === 'divider' ? (
+                        <div className="my-2 flex items-center gap-2 text-[10px] text-muted-foreground/60">
+                          <div className="h-px flex-1 bg-border" />
+                          <span>· · ·</span>
+                          <div className="h-px flex-1 bg-border" />
+                        </div>
                       ) : (
-                        <div className="py-1 text-[15px] leading-7 text-foreground whitespace-pre-wrap text-left">{b.text}</div>
+                        <div className="py-0.5 text-[13px] leading-6 text-foreground/90 whitespace-pre-wrap break-words text-left">{b.text}</div>
                       )}
                     </div>
                   )
@@ -301,8 +361,8 @@ export function WorkspacePage() {
             <dl className="space-y-2 text-xs">
               <DetailItem label="阶段" value={phaseLabel(snap.phase)} />
               <DetailItem label="推进模式" value={snap.advance_mode === 'review' ? '逐章验收' : '全自动'} />
-              <DetailItem label="已完成" value={`${snap.completed_count} 章`} />
-              <DetailItem label="当前" value={`第 ${snap.chapter} 章`} />
+              <DetailItem label="已完成" value={`${snap.completed_count ?? 0} 章`} />
+              <DetailItem label="当前" value={`第 ${snap.chapter || 0} 章`} />
               <DetailItem label="思考模式" value={snap.thinking ? '开' : '关'} />
               <DetailItem label="导入中" value={snap.is_importing ? '是' : '否'} />
               <DetailItem label="仿写中" value={snap.is_simulating ? '是' : '否'} />
@@ -343,31 +403,51 @@ export function WorkspacePage() {
             <UploadCloud className="h-3 w-3" />
             导入
           </Button>
-          <Button variant="outline" size="sm" className="h-7 text-xs gap-1 shrink-0" title="导出小说" onClick={() => runCommand('/export')} disabled={exporting}>
-            {exporting ? <Loader2 className="h-3 w-3 animate-spin" /> : <BookDown className="h-3 w-3" />}
+          <Button variant="outline" size="sm" className="h-7 text-xs gap-1 shrink-0" title="导出小说" onClick={() => setExportOpen(true)}>
+            <BookDown className="h-3 w-3" />
             导出
           </Button>
         </div>
         {/* 输入框 */}
         <div className="px-3 pb-3">
-          <div className="flex gap-2 max-w-4xl mx-auto">
-            <Input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input) } }}
-              placeholder="输入 / 命令或创作干预文本，Enter 发送"
-              className="h-10 text-left"
-            />
-            <Button size="icon" onClick={() => send(input)} className="shrink-0"><Send className="h-4 w-4" /></Button>
+          <div className="relative w-full">
+            {/* / 命令选择列表 */}
+            {cmdMenuOpen && filteredCommands.length > 0 && (
+              <div className="absolute bottom-full left-0 right-0 mb-1 rounded-md border bg-popover shadow-md overflow-y-auto max-h-64 z-20">
+                {filteredCommands.map((c, i) => (
+                  <button
+                    key={c.name}
+                    type="button"
+                    onMouseDown={(e) => { e.preventDefault(); pickCommand(c.name) }}
+                    className={`w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-muted ${i === cmdIndex ? 'bg-muted' : ''}`}
+                  >
+                    <c.icon className="h-3.5 w-3.5 shrink-0 text-primary" />
+                    <span className="font-mono text-xs shrink-0 w-20">{c.name}</span>
+                    <span className="text-muted-foreground truncate">{c.desc}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2 w-full">
+              <Input
+                value={input}
+                onChange={(e) => { setInput(e.target.value); setCmdIndex(0) }}
+                onKeyDown={onInputKeyDown}
+                placeholder="输入 / 命令或创作干预文本，Enter 发送"
+                className="flex-1 h-10 text-left"
+              />
+              <Button size="icon" onClick={() => send(input)} className="shrink-0"><Send className="h-4 w-4" /></Button>
+            </div>
           </div>
-          <p className="text-[11px] text-muted-foreground mt-1.5 text-center">
-            运行中直接输入为干预建议 · 空闲时输入为继续创作指令 · 支持 /review /auto /next /abort /resume /reopen 等命令
+          <p className="text-[11px] text-muted-foreground mt-1.5 text-left">
+            运行中直接输入为干预建议 · 空闲时输入为继续创作指令 · 输入 <span className="font-mono">/</span> 查看全部命令
           </p>
         </div>
       </div>
 
       <ImportDialog bookId={id!} open={importOpen} onOpenChange={setImportOpen} />
       <ModelDialog bookId={id!} open={modelOpen} onOpenChange={setModelOpen} currentProvider={snap?.provider} currentModel={snap?.model} />
+      <ExportDialog bookId={id!} open={exportOpen} onOpenChange={setExportOpen} />
     </div>
   )
 }

@@ -109,6 +109,64 @@ func (s *Server) handleDeleteBook(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGetBook 返回书的 UISnapshot 全量状态。
+// snapshotDTO 是 /api/books/{id} 的前端契约（小写键）。host.UISnapshot 无 json tag，
+// 直接 Marshal 会输出 PascalCase，与前端字段（provider/model/chapter/word_count…）不符，
+// 导致模型对话框空选、"undefined 章"、字数为 0 等问题；这里显式映射为前端约定字段。
+type snapshotDTO struct {
+	Provider      string `json:"provider"`
+	Model         string `json:"model"`
+	NovelName     string `json:"novel_name"`
+	RuntimeState  string `json:"runtime_state"`
+	StatusLabel   string `json:"status_label"`
+	Phase         string `json:"phase"`
+	Chapter       int    `json:"chapter"`
+	TotalChapters int    `json:"total_chapters"`
+	CompletedCount int   `json:"completed_count"`
+	WordCount     int    `json:"word_count"`
+	AdvanceMode   string `json:"advance_mode"`
+	Thinking      bool   `json:"thinking"`
+	ThinkingLevel string `json:"thinking_level"`
+	ChapterTitle  string `json:"chapter_title,omitempty"`
+	Premise       string `json:"premise,omitempty"`
+	IsRunning     bool   `json:"is_running"`
+	IsImporting   bool   `json:"is_importing"`
+	IsSimulating  bool   `json:"is_simulating"`
+	IsCocreating  bool   `json:"is_cocreating"`
+}
+
+func toSnapshotDTO(s host.UISnapshot) snapshotDTO {
+	title := ""
+	chapter := s.CurrentChapter
+	if chapter == 0 && s.InProgressChapter > 0 {
+		chapter = s.InProgressChapter
+	}
+	for _, o := range s.Outline {
+		if o.Chapter == chapter {
+			title = o.Title
+			break
+		}
+	}
+	thinkingOn := s.ThinkingLevel != "" && s.ThinkingLevel != "off" && s.ThinkingLevel != "none"
+	return snapshotDTO{
+		Provider:       s.Provider,
+		Model:          s.ModelName,
+		NovelName:      s.NovelName,
+		RuntimeState:   s.RuntimeState,
+		StatusLabel:    s.StatusLabel,
+		Phase:          s.Phase,
+		Chapter:        chapter,
+		TotalChapters:  s.TotalChapters,
+		CompletedCount: s.CompletedCount,
+		WordCount:      s.TotalWordCount,
+		AdvanceMode:    s.AdvanceMode,
+		Thinking:       thinkingOn,
+		ThinkingLevel:  s.ThinkingLevel,
+		ChapterTitle:   title,
+		Premise:        s.Premise,
+		IsRunning:      s.IsRunning,
+	}
+}
+
 func (s *Server) handleGetBook(w http.ResponseWriter, r *http.Request) {
 	uid := UserIDFromContext(r.Context())
 	book, err := s.books.Get(uid, r.PathValue("id"))
@@ -116,7 +174,7 @@ func (s *Server) handleGetBook(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "%v", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, book.host.Snapshot())
+	writeJSON(w, http.StatusOK, toSnapshotDTO(book.host.Snapshot()))
 }
 
 // handleBookStream 是书的 SSE 事件流：先回放历史（ReplayQueue），再订阅实时增量。
@@ -205,12 +263,38 @@ func (s *Server) replayRuntimeQueue(w io.Writer, flusher http.Flusher, book *Boo
 	}
 }
 
+// eventDTO 是 SSE "event" 帧的前端契约（小写键）。host.Event 无 json tag，
+// 直接 Marshal 会得到 PascalCase，与前端解析不符；这里显式转成前端约定的字段。
+type eventDTO struct {
+	Time     string `json:"time"`
+	Category string `json:"category"`
+	Agent    string `json:"agent,omitempty"`
+	Summary  string `json:"summary"`
+	Level    string `json:"level,omitempty"`
+	Failed   bool   `json:"failed,omitempty"`
+}
+
+func toEventDTO(ev host.Event) eventDTO {
+	t := ""
+	if !ev.Time.IsZero() {
+		t = ev.Time.Format(time.RFC3339)
+	}
+	return eventDTO{
+		Time:     t,
+		Category: ev.Category,
+		Agent:    ev.Agent,
+		Summary:  ev.Summary,
+		Level:    ev.Level,
+		Failed:   ev.Failed,
+	}
+}
+
 // writeSSE 把一条 hub 消息写成 SSE 帧。delta 用 JSON 字符串编码保证多行安全。
 func writeSSE(w io.Writer, m hubMessage) error {
 	var sb strings.Builder
 	switch m.kind {
 	case "event":
-		data, err := json.Marshal(m.event)
+		data, err := json.Marshal(toEventDTO(m.event))
 		if err != nil {
 			return err
 		}
@@ -416,16 +500,8 @@ type cocreateApplyRequest struct {
 	Stage bool   `json:"stage"` // true=阶段共创 ResumeFromCoCreate；false=冷启动 StartWithPrompt
 }
 
-// cocreateProgress 是经 SSE 的 cocreate 类型推送的共创进度。
-type cocreateProgress struct {
-	ReqID string              `json:"req_id"`
-	Kind  string              `json:"kind"` // thinking|reply|done|error
-	Text  string              `json:"text,omitempty"`
-	Reply *host.CoCreateReply `json:"reply,omitempty"`
-	Error string              `json:"error,omitempty"`
-}
-
-// handleCoCreate 发起一轮共创对话（thinking/reply 流式经 SSE 推送，完成后推 done+reply）。
+// handleCoCreate 发起一轮共创对话，直接在本 POST 响应上以 SSE 同步流式返回：
+// thinking / delta（reply 预览）/ draft（完整草稿）/ suggestion / done / error。
 func (s *Server) handleCoCreate(w http.ResponseWriter, r *http.Request) {
 	book, ok := s.bookFor(w, r)
 	if !ok {
@@ -443,27 +519,50 @@ func (s *Server) handleCoCreate(w http.ResponseWriter, r *http.Request) {
 		}
 		stream = book.host.StageCoCreateStream
 	}
-	reqID := newReqID()
-	ctx, cancel := context.WithCancel(context.Background())
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeErr(w, http.StatusInternalServerError, "服务器不支持流式响应")
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	writeCoCreateSSE := func(event, data string) {
+		payload, _ := json.Marshal(data)
+		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, payload)
+		flusher.Flush()
+	}
+
+	ctx, cancel := context.WithCancel(r.Context())
 	book.setAuxCancel(cancel)
-	go func() {
-		defer cancel()
-		reply, err := stream(ctx, req.Messages, func(kind, text string) {
-			book.hub.Publish(hubMessage{kind: "cocreate", payload: cocreateProgress{
-				ReqID: reqID, Kind: kind, Text: text,
-			}})
-		})
-		if err != nil {
-			book.hub.Publish(hubMessage{kind: "cocreate", payload: cocreateProgress{
-				ReqID: reqID, Kind: "error", Error: err.Error(),
-			}})
-			return
+	defer cancel()
+
+	reply, err := stream(ctx, req.Messages, func(kind, text string) {
+		switch kind {
+		case host.CoCreateProgressThinking:
+			writeCoCreateSSE("thinking", text)
+		case host.CoCreateProgressReply:
+			writeCoCreateSSE("delta", text)
 		}
-		book.hub.Publish(hubMessage{kind: "cocreate", payload: cocreateProgress{
-			ReqID: reqID, Kind: "done", Reply: &reply,
-		}})
-	}()
-	writeJSON(w, http.StatusAccepted, map[string]any{"req_id": reqID})
+	})
+	if err != nil {
+		writeCoCreateSSE("error", err.Error())
+		return
+	}
+	if strings.TrimSpace(reply.Message) != "" {
+		writeCoCreateSSE("delta", reply.Message)
+	}
+	if strings.TrimSpace(reply.Prompt) != "" {
+		writeCoCreateSSE("draft", reply.Prompt)
+	}
+	for _, sug := range reply.Suggestions {
+		writeCoCreateSSE("suggestion", sug)
+	}
+	writeCoCreateSSE("done", "")
 }
 
 // handleCoCreateApply 应用共创草稿：阶段共创恢复引擎；冷启动以草稿启动新书引擎。
@@ -897,6 +996,8 @@ func (s *Server) registerConfigRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/books/{id}/config", s.guard(s.handleSaveConfig))
 	mux.HandleFunc("POST /api/books/{id}/config/test", s.guard(s.handleTestConfig))
 	mux.HandleFunc("POST /api/books/{id}/diag", s.guard(s.handleDiag))
+	mux.HandleFunc("POST /api/provider/models", s.guard(s.handleProviderModels))
+	mux.HandleFunc("POST /api/provider/test", s.guard(s.handleProviderTest))
 }
 
 // modelRoles 是可供切换模型的角色（空串 = 默认角色）。

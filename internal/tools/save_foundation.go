@@ -126,7 +126,11 @@ func (t *SaveFoundationTool) Execute(_ context.Context, args json.RawMessage) (j
 			}
 			result["novel_name"] = name
 		}
-		if err := t.store.Progress.UpdatePhase(domain.PhasePremise); err != nil {
+		// 阶段只前进：已进入 outline/writing 后再次保存 premise（模型偶发重复调用）时，
+		// premise 内容已落盘即可，跳过会被拒绝的 outline->premise 回退，不再报错中断创作。
+		if cur, err := t.store.Progress.Load(); err == nil && cur != nil && !domain.CanTransitionPhase(cur.Phase, domain.PhasePremise) {
+			result["phase_kept"] = string(cur.Phase)
+		} else if err := t.store.Progress.UpdatePhase(domain.PhasePremise); err != nil {
 			return nil, fmt.Errorf("update premise phase: %w: %w", errs.ErrStoreWrite, err)
 		}
 

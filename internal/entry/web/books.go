@@ -553,15 +553,6 @@ func newBookID() string {
 	return time.Now().Format("20060102-150405") + "-" + hex.EncodeToString(buf)
 }
 
-// newReqID 生成附加操作（导入/仿写/共创）的请求 ID。
-func newReqID() string {
-	buf := make([]byte, 4)
-	if _, err := rand.Read(buf); err != nil {
-		return time.Now().Format("150405.000")
-	}
-	return hex.EncodeToString(buf)
-}
-
 // applyUserConfig 将用户自己的全局配置叠加到系统配置之上（多用户配置隔离）。
 func applyUserConfig(cfg *bootstrap.Config, uc *UserConfigRow) {
 	if uc == nil {

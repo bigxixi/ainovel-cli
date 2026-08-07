@@ -7,6 +7,12 @@ go.work.sum
 .DS_Store
 .env
 .ainovel
+node_modules
+**/node_modules
+webui/dist
+internal/entry/web/static/assets
+internal/entry/web/static/*.html
+internal/entry/web/static/*.svg
 config
 workspace
 dist

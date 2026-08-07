@@ -8,6 +8,7 @@
 package web
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -17,6 +18,8 @@ import (
 	"path"
 	"strings"
 	"time"
+
+	"github.com/voocel/agentcore"
 
 	"github.com/bigxixi/ainovel-webui/internal/bootstrap"
 )
@@ -305,6 +308,7 @@ func (s *Server) handleProfileConfigSave(w http.ResponseWriter, r *http.Request)
 		Temperature float64 `json:"temperature"`
 		MaxTokens   int     `json:"max_tokens"`
 		Thinking    bool    `json:"thinking"`
+		Validate    bool    `json:"validate"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, 400, "请求格式错误")
@@ -313,6 +317,25 @@ func (s *Server) handleProfileConfigSave(w http.ResponseWriter, r *http.Request)
 	if req.BaseURL != "" {
 		if err := validateBaseURL(req.BaseURL); err != nil {
 			writeErr(w, 400, "%v", err)
+			return
+		}
+	}
+	if req.Validate {
+		draft := providerDraft{Provider: req.Provider, Model: req.Model, BaseURL: req.BaseURL, APIKey: req.APIKey}
+		cfg := draft.buildProbeConfig(req.Model)
+		if err := cfg.ValidateBase(); err != nil {
+			writeErr(w, 400, "配置无效：%v", err)
+			return
+		}
+		models, err := bootstrap.NewModelSet(cfg)
+		if err != nil {
+			writeErr(w, 400, "创建模型客户端失败：%v", err)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+		if _, err := models.Default.Generate(ctx, []agentcore.Message{agentcore.UserMsg("Reply OK.")}, nil); err != nil {
+			writeErr(w, 502, "%s", mapProviderError(err))
 			return
 		}
 	}

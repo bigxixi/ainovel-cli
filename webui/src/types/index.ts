@@ -10,6 +10,7 @@ export interface BookMeta {
 // 快照（对应 host.Snapshot）
 export interface Snapshot {
   runtime_state: string
+  status_label?: string
   phase: string
   chapter: number
   total_chapters: number
@@ -17,11 +18,15 @@ export interface Snapshot {
   word_count: number
   advance_mode: string
   thinking: boolean
+  thinking_level?: string
   is_importing: boolean
   is_simulating: boolean
   is_cocreating: boolean
+  is_running?: boolean
   provider: string
   model: string
+  novel_name?: string
+  premise?: string
   last_error?: string
   chapter_title?: string
   featured_pending?: boolean
@@ -33,6 +38,8 @@ export interface StreamEvent {
   category: string
   summary: string
   agent?: string
+  level?: string
+  failed?: boolean
 }
 
 // 认证状态
@@ -66,6 +73,7 @@ export interface ProfileConfig {
   temperature?: number
   max_tokens?: number
   thinking?: boolean
+  validate?: boolean
 }
 
 // Provider 预设（后端 /api/setup/presets 返回数组）
@@ -112,6 +120,17 @@ export interface ImportRequest {
 export interface ExportRequest {
   format?: string
   out_path?: string
+  from?: number
+  to?: number
+  overwrite?: boolean
+}
+
+export interface ExportResult {
+  chapters: number
+  bytes: number
+  path: string
+  skipped: number
+  download: string
 }
 
 // 共创消息
@@ -120,6 +139,7 @@ export interface CoCreateMessage {
   content: string
   thinking?: string
   suggestions?: string[]
+  draft?: string
 }
 
 // 共创请求
